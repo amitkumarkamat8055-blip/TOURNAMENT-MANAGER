@@ -1,0 +1,6 @@
+{
+  "name": "Tournament Match Manager",
+  "description": "A modern tournament and match management app with match listings, custom tournament creation, and player profile tracking.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
