@@ -273,11 +273,21 @@ fun UserScreen(
     }
   }
 
-  val myHostedProfiles = remember(firestoreCustomProfiles, userProfile, activeAccount, currentAuthUid) {
+  val myHostedProfiles = remember(firestoreCustomProfiles, userProfile, activeAccount, currentAuthUid, isAdmin) {
     val activeGameUid = activeAccount?.gameUid?.trim()?.takeIf { it.isNotBlank() } ?: userProfile.uid.trim()
+    val activePhone = activeAccount?.phone?.filter { it.isDigit() }?.takeIf { it.isNotBlank() } ?: ""
+    val activeUsername = activeAccount?.username?.trim()?.takeIf { it.isNotBlank() } ?: userProfile.name.trim()
+
     firestoreCustomProfiles.filter { profile ->
-      (activeGameUid.isNotBlank() && (profile.uid.equals(activeGameUid, ignoreCase = true) || profile.hostUid.equals(activeGameUid, ignoreCase = true))) ||
-      (currentAuthUid.isNotBlank() && profile.hostUid.isNotBlank() && profile.hostUid == currentAuthUid && (activeAccount == null || activeAccount.phone == com.example.ui.viewmodel.AdminConfig.ADMIN_PHONE || activeAccount.gameUid.isBlank() || activeAccount.gameUid.equals(profile.uid, ignoreCase = true)))
+      isAdmin ||
+      (activeGameUid.isNotBlank() && (
+          profile.uid.equals(activeGameUid, ignoreCase = true) ||
+          profile.hostUid.equals(activeGameUid, ignoreCase = true) ||
+          profile.hostGameUid.equals(activeGameUid, ignoreCase = true)
+      )) ||
+      (currentAuthUid.isNotBlank() && profile.hostUid.isNotBlank() && profile.hostUid == currentAuthUid) ||
+      (activePhone.isNotBlank() && profile.hostPhone.filter { it.isDigit() }.isNotBlank() && profile.hostPhone.filter { it.isDigit() } == activePhone) ||
+      (activeUsername.isNotBlank() && (profile.hostActualName.equals(activeUsername, ignoreCase = true) || profile.name.equals(activeUsername, ignoreCase = true)))
     }
   }
   val myHostedProfileIds = remember(myHostedProfiles) { myHostedProfiles.map { it.id }.toSet() }
@@ -817,196 +827,198 @@ fun UserScreen(
           }
         } else {
             items(appliedProfilesToShow, key = { "app_${it.id}" }) { app ->
-            val profile = firestoreCustomProfiles.find { it.id == app.profileId }
-            val formattedPayout = formatPayout(app.payout.ifBlank { profile?.payout ?: "" })
-            val roomName = app.profileName.ifBlank { profile?.name ?: "Custom Room" }
-            Card(
-              shape = RoundedCornerShape(14.dp),
-              colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-              border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f)),
-              modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
-            ) {
-              Column(
-                modifier = Modifier
-                  .fillMaxWidth()
-                  .padding(14.dp)
+              val profile = firestoreCustomProfiles.find { it.id == app.profileId }
+              val formattedPayout = formatPayout(app.payout.ifBlank { profile?.payout ?: "" })
+              val roomName = app.profileName.ifBlank { profile?.name ?: "Custom Room" }
+              val hostName = app.hostActualName.ifBlank { profile?.hostActualName ?: profile?.name ?: "" }
+              val hostGameUid = app.hostGameUid.ifBlank { profile?.hostGameUid ?: profile?.uid ?: "" }
+              val hostContact = app.hostPhone.ifBlank { app.hostEmail.ifBlank { profile?.hostPhone ?: profile?.hostEmail ?: "" } }
+
+              Card(
+                shape = RoundedCornerShape(14.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                border = BorderStroke(1.dp, when (app.status) {
+                  "Accepted" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                  "Paid" -> SuccessGreen.copy(alpha = 0.6f)
+                  "Rejected" -> MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
+                  else -> SuccessGreen.copy(alpha = 0.4f)
+                }),
+                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
               ) {
-                // 1. First: Room Name
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
+                Column(
+                  modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(14.dp)
                 ) {
+                  // 1. Header: Room Name + Status Badge + Cancel/Delete Icon
                   Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f, fill = false).padding(end = 8.dp)
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
                   ) {
-                    Icon(
-                      imageVector = Icons.Default.SportsEsports,
-                      contentDescription = null,
-                      tint = MaterialTheme.colorScheme.primary,
-                      modifier = Modifier.size(20.dp)
-                    )
-                    Text(
-                      text = roomName,
-                      style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                      color = MaterialTheme.colorScheme.onSurface,
-                      maxLines = 1,
-                      overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                    )
-                  }
-
-                  if (app.status == "Pending" || app.status == "Rejected") {
-                    androidx.compose.material3.IconButton(
-                      onClick = { 
-                        appToDelete = app
-                        isRejectAction = false
-                      },
-                      modifier = Modifier.size(24.dp)
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(8.dp),
+                      modifier = Modifier.weight(1f).padding(end = 8.dp)
                     ) {
-                      androidx.compose.material3.Icon(
-                        imageVector = Icons.Default.DeleteOutline,
-                        contentDescription = "Cancel Registration",
-                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                        modifier = Modifier.size(18.dp)
+                      Icon(
+                        imageVector = Icons.Default.SportsEsports,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
                       )
-                    }
-                  }
-                }
-
-                val hostName = app.hostActualName.ifBlank { profile?.hostActualName ?: profile?.name ?: "" }
-                val hostContact = app.hostPhone.ifBlank { app.hostEmail.ifBlank { profile?.hostPhone ?: profile?.hostEmail ?: "" } }
-                val hostGameUid = app.hostGameUid.ifBlank { profile?.hostGameUid ?: profile?.uid ?: "" }
-                if (hostName.isNotBlank() || hostContact.isNotBlank() || hostGameUid.isNotBlank()) {
-                  Row(
-                    modifier = Modifier.fillMaxWidth().padding(top = 4.dp, bottom = 4.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                  ) {
-                    if (hostName.isNotBlank()) {
                       Text(
-                        text = "Host: $hostName",
-                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.primary,
+                        text = roomName,
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onSurface,
                         maxLines = 1,
                         overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                       )
                     }
-                    if (hostGameUid.isNotBlank()) {
-                      Text(
-                        text = "• UID: $hostGameUid",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                      )
-                    }
-                    if (hostContact.isNotBlank()) {
-                      Text(
-                        text = "• Contact: $hostContact",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                      )
+
+                    Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                      // Status badge
+                      Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = when (app.status) {
+                          "Rejected" -> MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
+                          "Accepted" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
+                          "Paid" -> SuccessGreen.copy(alpha = 0.2f)
+                          else -> SuccessGreen.copy(alpha = 0.15f)
+                        }
+                      ) {
+                        Text(
+                          text = if (app.status == "Pending") "PENDING" else app.status.uppercase(),
+                          style = MaterialTheme.typography.labelSmall.copy(
+                            fontWeight = FontWeight.Bold,
+                            color = when (app.status) {
+                              "Rejected" -> MaterialTheme.colorScheme.error
+                              "Accepted" -> MaterialTheme.colorScheme.primary
+                              "Paid" -> SuccessGreen
+                              else -> SuccessGreen
+                            }
+                          ),
+                          modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                          maxLines = 1,
+                          softWrap = false
+                        )
+                      }
+
+                      // Delete / Cancel button (single, top-right)
+                      androidx.compose.material3.IconButton(
+                        onClick = { 
+                          appToDelete = app
+                          isRejectAction = false
+                        },
+                        modifier = Modifier.size(28.dp)
+                      ) {
+                        androidx.compose.material3.Icon(
+                          imageVector = Icons.Default.DeleteOutline,
+                          contentDescription = "Cancel Registration",
+                          tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+                          modifier = Modifier.size(18.dp)
+                        )
+                      }
                     }
                   }
-                }
 
-                Spacer(modifier = Modifier.height(4.dp))
+                  Spacer(modifier = Modifier.height(6.dp))
 
-                // 2. UID --  Payout --  [status]
-                Row(
-                  modifier = Modifier.fillMaxWidth(),
-                  horizontalArrangement = Arrangement.SpaceBetween,
-                  verticalAlignment = Alignment.CenterVertically
-                ) {
+                  // 2. Host information line
+                  if (hostName.isNotBlank() || hostGameUid.isNotBlank() || hostContact.isNotBlank()) {
+                    Row(
+                      modifier = Modifier.fillMaxWidth(),
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                      if (hostName.isNotBlank()) {
+                        Text(
+                          text = "Host: $hostName",
+                          style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                          color = MaterialTheme.colorScheme.primary,
+                          maxLines = 1,
+                          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                      }
+                      if (hostGameUid.isNotBlank()) {
+                        Text(
+                          text = "• UID: $hostGameUid",
+                          style = MaterialTheme.typography.bodySmall,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                      }
+                      if (hostContact.isNotBlank()) {
+                        Text(
+                          text = "• Contact: $hostContact",
+                          style = MaterialTheme.typography.bodySmall,
+                          color = MaterialTheme.colorScheme.onSurfaceVariant,
+                          maxLines = 1,
+                          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                      }
+                    }
+                    Spacer(modifier = Modifier.height(4.dp))
+                  }
+
+                  // 3. User Game UID, Level, and Payout Amount
                   Row(
-                    modifier = Modifier.weight(1f).padding(end = 8.dp),
+                    modifier = Modifier.fillMaxWidth(),
                     verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                    horizontalArrangement = Arrangement.spacedBy(16.dp)
                   ) {
                     Text(
-                      text = "UID - ${app.uid}",
+                      text = "UID: ${app.uid}",
                       style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
                       color = MaterialTheme.colorScheme.onSurface
                     )
+                    Text(
+                      text = "Lv: ${app.level}",
+                      style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
+                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
                     if (formattedPayout.isNotBlank()) {
                       Text(
-                        text = "Payout - $formattedPayout",
-                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        text = "Payout: $formattedPayout",
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
                       )
                     }
                   }
 
-                  // [status] badge
+                  Spacer(modifier = Modifier.height(10.dp))
+
+                  // 4. Status Message Banner
                   Surface(
-                    shape = RoundedCornerShape(6.dp),
+                    shape = RoundedCornerShape(10.dp),
                     color = when (app.status) {
-                      "Rejected" -> MaterialTheme.colorScheme.error.copy(alpha = 0.2f)
-                      "Accepted" -> SuccessGreen.copy(alpha = 0.2f)
-                      "Paid" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.2f)
-                      else -> SuccessGreen.copy(alpha = 0.2f)
-                    }
+                      "Accepted" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                      "Paid" -> SuccessGreen.copy(alpha = 0.12f)
+                      "Rejected" -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.3f)
+                      else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                    },
+                    border = BorderStroke(1.dp, when (app.status) {
+                      "Accepted" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)
+                      "Paid" -> SuccessGreen.copy(alpha = 0.35f)
+                      "Rejected" -> MaterialTheme.colorScheme.error.copy(alpha = 0.35f)
+                      else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    }),
+                    modifier = Modifier.fillMaxWidth()
                   ) {
-                    Text(
-                      text = if (app.status == "Pending") "PENDING" else app.status.uppercase(),
-                      style = MaterialTheme.typography.labelSmall.copy(
-                        fontWeight = FontWeight.Bold,
-                        color = when (app.status) {
-                          "Rejected" -> MaterialTheme.colorScheme.error
-                          "Accepted" -> SuccessGreen
-                          "Paid" -> MaterialTheme.colorScheme.primary
-                          else -> SuccessGreen
-                        }
-                      ),
-                      modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                      maxLines = 1,
-                      softWrap = false
-                    )
-                  }
-                }
-
-                Spacer(modifier = Modifier.height(4.dp))
-
-                // 3. LV --
-                Text(
-                  text = "LV - ${app.level}",
-                  style = MaterialTheme.typography.bodySmall,
-                  color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-
-                // Message Container: displayed for all registration statuses (Pending, Accepted, Paid, Rejected)
-                Spacer(modifier = Modifier.height(12.dp))
-                Surface(
-                  shape = RoundedCornerShape(10.dp),
-                  color = when (app.status) {
-                    "Accepted" -> MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f)
-                    "Paid" -> SuccessGreen.copy(alpha = 0.15f)
-                    "Rejected" -> MaterialTheme.colorScheme.errorContainer.copy(alpha = 0.4f)
-                    else -> MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                  },
-                  border = BorderStroke(1.dp, when (app.status) {
-                    "Accepted" -> MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)
-                    "Paid" -> SuccessGreen.copy(alpha = 0.5f)
-                    "Rejected" -> MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
-                    else -> MaterialTheme.colorScheme.outlineVariant
-                  }),
-                  modifier = Modifier.fillMaxWidth()
-                ) {
-                  Column(modifier = Modifier.padding(12.dp)) {
-                    Row(
-                      modifier = Modifier.fillMaxWidth(),
-                      horizontalArrangement = Arrangement.SpaceBetween,
-                      verticalAlignment = Alignment.Top
-                    ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                       Row(
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        modifier = Modifier.weight(1f).padding(end = 8.dp)
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                       ) {
                         Icon(
-                          imageVector = Icons.Default.Chat,
+                          imageVector = when (app.status) {
+                            "Accepted" -> Icons.Default.CheckCircle
+                            "Paid" -> Icons.Default.CheckCircle
+                            "Rejected" -> Icons.Default.Close
+                            else -> Icons.Default.Schedule
+                          },
                           contentDescription = null,
                           tint = when (app.status) {
                             "Accepted" -> MaterialTheme.colorScheme.primary
@@ -1018,10 +1030,10 @@ fun UserScreen(
                         )
                         Text(
                           text = when (app.status) {
-                            "Accepted" -> "Message: Application Accepted"
-                            "Paid" -> "Message: Payment Confirmed"
-                            "Rejected" -> "Message: Application Declined"
-                            else -> "Message: Application Submitted"
+                            "Accepted" -> "Application Accepted"
+                            "Paid" -> "Payment Confirmed"
+                            "Rejected" -> "Application Declined"
+                            else -> "Application Submitted"
                           },
                           style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                           color = when (app.status) {
@@ -1032,143 +1044,115 @@ fun UserScreen(
                           }
                         )
                       }
-                      androidx.compose.material3.IconButton(
-                        onClick = { 
-                          appToDelete = app
-                          isRejectAction = false
+
+                      Spacer(modifier = Modifier.height(4.dp))
+
+                      Text(
+                        text = when {
+                          !app.roomId.isNullOrBlank() -> "Room credentials released! Open Free Fire MAX on time to join."
+                          app.status == "Paid" -> "Payment received! Waiting for host to release room ID & password."
+                          app.status == "Accepted" -> "Host has accepted your application! Book & pay now to confirm your slot."
+                          app.status == "Rejected" -> "Your application was declined by the host."
+                          else -> "Your application for $roomName has been submitted! Waiting for host ${if (hostName.isNotBlank()) "($hostName) " else ""}to review and accept your registration."
                         },
-                        modifier = Modifier.size(24.dp)
-                      ) {
-                        androidx.compose.material3.Icon(
-                          imageVector = Icons.Default.Delete,
-                          contentDescription = "Delete Application",
-                          tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
-                          modifier = Modifier.size(20.dp)
-                        )
-                      }
-                    }
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                      )
 
-                    Spacer(modifier = Modifier.height(6.dp))
-                    Text(
-                      text = when {
-                        !app.roomId.isNullOrBlank() -> "Room details received! Join the match on Free Fire MAX on time."
-                        app.status == "Paid" -> "Payment successful! Waiting for host to send room details."
-                        app.status == "Accepted" -> if (formattedPayout.isNotBlank()) "Your application was accepted! Now it is time to make your payment of $formattedPayout." else "Your application was accepted! Now it is time to make your payment."
-                        app.status == "Rejected" -> "Your application was declined by the host."
-                        else -> "Your application for $roomName has been submitted! Waiting for host ${if (hostName.isNotBlank()) "($hostName) " else ""}to review and accept your registration."
-                      },
-                      style = MaterialTheme.typography.bodySmall,
-                      color = MaterialTheme.colorScheme.onSurface
-                    )
-
-                    if (!app.roomId.isNullOrBlank() && !app.roomPassword.isNullOrBlank()) {
+                      // Book & Pay button when Accepted
+                      if (app.status == "Accepted" && app.roomId.isNullOrBlank()) {
                         Spacer(modifier = Modifier.height(10.dp))
-                        Surface(
-                            shape = RoundedCornerShape(10.dp),
-                            color = MaterialTheme.colorScheme.surface,
-                            border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f)),
-                            modifier = Modifier.fillMaxWidth()
-                        ) {
-                            Column(modifier = Modifier.padding(12.dp)) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Chat,
-                                        contentDescription = null,
-                                        tint = SuccessGreen,
-                                        modifier = Modifier.size(16.dp)
-                                    )
-                                    Text(
-                                        text = "Admin Message: Room Credentials",
-                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                                        color = SuccessGreen
-                                    )
-                                }
-                                Spacer(modifier = Modifier.height(6.dp))
-                                Text(
-                                    text = "Credentials released! Join custom room on Free Fire MAX on time.",
-                                    style = MaterialTheme.typography.bodySmall,
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                                Spacer(modifier = Modifier.height(10.dp))
-                                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable {
-                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                clipboard.setPrimaryClip(ClipData.newPlainText("Room ID", app.roomId))
-                                                Toast.makeText(context, "Room ID copied: ${app.roomId}", Toast.LENGTH_SHORT).show()
-                                            }
-                                    ) {
-                                        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("ROOM ID", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text(app.roomId, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
-                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Room ID", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
-                                            }
-                                        }
-                                    }
-                                    Surface(
-                                        shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.4f)),
-                                        modifier = Modifier
-                                            .weight(1f)
-                                            .clickable {
-                                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
-                                                clipboard.setPrimaryClip(ClipData.newPlainText("Password", app.roomPassword))
-                                                Toast.makeText(context, "Password copied: ${app.roomPassword}", Toast.LENGTH_SHORT).show()
-                                            }
-                                    ) {
-                                        Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                                            Text("PASSWORD", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
-                                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                                Text(app.roomPassword, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = SuccessGreen)
-                                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Password", modifier = Modifier.size(14.dp), tint = SuccessGreen)
-                                            }
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        Spacer(modifier = Modifier.height(10.dp))
-                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            Button(
-                                onClick = { appForSubmit = app },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
-                            ) {
-                                Text("Submit")
-                            }
-                            Button(
-                                onClick = { appForReport = app },
-                                modifier = Modifier.weight(1f),
-                                colors = ButtonDefaults.buttonColors(containerColor = AlertRed)
-                            ) {
-                                Text("Report")
-                            }
-                        }
-                    } else if (app.status == "Accepted") {
-                        Spacer(modifier = Modifier.height(8.dp))
                         Button(
                           onClick = { appForPayment = app },
                           modifier = Modifier.fillMaxWidth(),
-                          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+                          shape = RoundedCornerShape(8.dp)
                         ) {
-                          Text("Book & Pay")
+                          Icon(
+                            imageVector = Icons.Default.AccountBalanceWallet,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                          )
+                          Spacer(modifier = Modifier.width(8.dp))
+                          Text(
+                            text = if (formattedPayout.isNotBlank()) "Book & Pay ($formattedPayout)" else "Book & Pay",
+                            style = MaterialTheme.typography.labelLarge.copy(fontWeight = FontWeight.Bold)
+                          )
                         }
+                      }
+
+                      // Room Credentials and Submit/Report when available
+                      if (!app.roomId.isNullOrBlank() && !app.roomPassword.isNullOrBlank()) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                              .weight(1f)
+                              .clickable {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Room ID", app.roomId))
+                                Toast.makeText(context, "Room ID copied: ${app.roomId}", Toast.LENGTH_SHORT).show()
+                              }
+                          ) {
+                            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                              Text("ROOM ID", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(app.roomId, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = MaterialTheme.colorScheme.primary)
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Room ID", modifier = Modifier.size(14.dp), tint = MaterialTheme.colorScheme.primary)
+                              }
+                            }
+                          }
+                          Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                            border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.4f)),
+                            modifier = Modifier
+                              .weight(1f)
+                              .clickable {
+                                val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+                                clipboard.setPrimaryClip(ClipData.newPlainText("Password", app.roomPassword))
+                                Toast.makeText(context, "Password copied: ${app.roomPassword}", Toast.LENGTH_SHORT).show()
+                              }
+                          ) {
+                            Column(modifier = Modifier.padding(8.dp), horizontalAlignment = Alignment.CenterHorizontally) {
+                              Text("PASSWORD", style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+                              Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                                Text(app.roomPassword, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.Bold, color = SuccessGreen)
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy Password", modifier = Modifier.size(14.dp), tint = SuccessGreen)
+                              }
+                            }
+                          }
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                          Button(
+                            onClick = { appForSubmit = app },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
+                            shape = RoundedCornerShape(8.dp)
+                          ) {
+                            Text("Submit Result")
+                          }
+                          Button(
+                            onClick = { appForReport = app },
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(containerColor = AlertRed),
+                            shape = RoundedCornerShape(8.dp)
+                          ) {
+                            Text("Report")
+                          }
+                        }
+                      }
                     }
                   }
                 }
+              }
             }
-          }
-        }
+
           items(userJoinedMatches, key = { it.id }) { match ->
             Card(
               shape = RoundedCornerShape(14.dp),

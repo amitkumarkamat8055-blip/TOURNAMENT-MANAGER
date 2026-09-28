@@ -108,17 +108,17 @@ import com.example.ui.theme.TrophyGold
 import com.example.ui.viewmodel.TournamentViewModel
 
 fun isProfileExpired(day: String, time: String): Boolean {
-    val format = java.text.SimpleDateFormat("d MMM h:mm a", java.util.Locale.getDefault())
+    val format = java.text.SimpleDateFormat("d MMM h:mm a", java.util.Locale.US)
     val currentCal = java.util.Calendar.getInstance()
     val currentYear = currentCal.get(java.util.Calendar.YEAR)
     
     try {
         val resolvedDay = when (day.trim().lowercase()) {
-            "today" -> java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(currentCal.time)
+            "today" -> java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(currentCal.time)
             "tomorrow" -> {
                 val cal = java.util.Calendar.getInstance()
                 cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
-                java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault()).format(cal.time)
+                java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(cal.time)
             }
             else -> day
         }
@@ -128,9 +128,10 @@ fun isProfileExpired(day: String, time: String): Boolean {
             profileCal.time = date
             profileCal.set(java.util.Calendar.YEAR, currentYear)
             
-            return profileCal.timeInMillis < currentCal.timeInMillis
+            // Allow a 60-minute match completion grace period before marking expired
+            return profileCal.timeInMillis + (60 * 60 * 1000L) < currentCal.timeInMillis
         }
-    } catch (e: Exception) {
+    } catch (_: Exception) {
     }
     return false
 }
@@ -171,11 +172,25 @@ fun CustomScreen(
   val currentAuthUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
 
   fun isProfileHost(profile: CustomProfile): Boolean {
+    if (isAdmin) return true
     val activeGameUid = activeAccount?.gameUid?.trim()?.takeIf { it.isNotBlank() } ?: userProfile.uid.trim()
-    if (activeGameUid.isNotBlank() && (profile.uid.equals(activeGameUid, ignoreCase = true) || profile.hostUid.equals(activeGameUid, ignoreCase = true))) {
+    val activePhone = activeAccount?.phone?.filter { it.isDigit() }?.takeIf { it.isNotBlank() } ?: ""
+    val activeUsername = activeAccount?.username?.trim()?.takeIf { it.isNotBlank() } ?: userProfile.name.trim()
+
+    if (activeGameUid.isNotBlank() && (
+        profile.uid.equals(activeGameUid, ignoreCase = true) ||
+        profile.hostUid.equals(activeGameUid, ignoreCase = true) ||
+        profile.hostGameUid.equals(activeGameUid, ignoreCase = true)
+    )) {
       return true
     }
-    if (currentAuthUid.isNotBlank() && profile.hostUid.isNotBlank() && profile.hostUid == currentAuthUid && (activeAccount == null || activeAccount.phone == com.example.ui.viewmodel.AdminConfig.ADMIN_PHONE || activeAccount.gameUid.isBlank() || activeAccount.gameUid.equals(profile.uid, ignoreCase = true))) {
+    if (currentAuthUid.isNotBlank() && profile.hostUid.isNotBlank() && profile.hostUid == currentAuthUid) {
+      return true
+    }
+    if (activePhone.isNotBlank() && profile.hostPhone.filter { it.isDigit() }.isNotBlank() && profile.hostPhone.filter { it.isDigit() } == activePhone) {
+      return true
+    }
+    if (activeUsername.isNotBlank() && (profile.hostActualName.equals(activeUsername, ignoreCase = true) || profile.name.equals(activeUsername, ignoreCase = true))) {
       return true
     }
     return false
@@ -197,10 +212,10 @@ fun CustomScreen(
        "Region" -> result = emptyList() // Handled via UI empty state directly
        "My Room" -> {
            result = result.filter { isProfileHost(it) }
-           if (myRoomSelectedTab == 0) {
-               result = result.filter { it.category.isBlank() || it.category.equals("Custom", ignoreCase = true) }
-           } else {
-               result = result.filter { it.category.equals("BR", ignoreCase = true) }
+           when (myRoomSelectedTab) {
+               1 -> result = result.filter { it.category.isBlank() || it.category.equals("Custom", ignoreCase = true) }
+               2 -> result = result.filter { it.category.equals("BR", ignoreCase = true) }
+               else -> { /* 0 = All rooms hosted by user */ }
            }
        }
     }
@@ -210,8 +225,13 @@ fun CustomScreen(
   
   androidx.compose.runtime.LaunchedEffect(firestoreProfiles, currentAuthUid) {
       if (currentAuthUid.isNotBlank()) {
-          val myProfiles = firestoreProfiles.filter { it.hostUid == currentAuthUid }
+          val myProfiles = firestoreProfiles.filter { isProfileHost(it) }
+          val currentTime = System.currentTimeMillis()
           for (profile in myProfiles) {
+              // Never trigger expiration if profile was created in the last 4 hours
+              if (profile.createdAt > 0 && currentTime - profile.createdAt < 4 * 60 * 60 * 1000L) {
+                  continue
+              }
               if (isProfileExpired(profile.day, profile.time)) {
                   expiredProfileToManage = profile
                   break 
@@ -407,11 +427,16 @@ fun CustomScreen(
           androidx.compose.material3.Tab(
             selected = myRoomSelectedTab == 0,
             onClick = { myRoomSelectedTab = 0 },
-            text = { Text("Custom", style = MaterialTheme.typography.labelLarge) }
+            text = { Text("All", style = MaterialTheme.typography.labelLarge) }
           )
           androidx.compose.material3.Tab(
             selected = myRoomSelectedTab == 1,
             onClick = { myRoomSelectedTab = 1 },
+            text = { Text("Custom", style = MaterialTheme.typography.labelLarge) }
+          )
+          androidx.compose.material3.Tab(
+            selected = myRoomSelectedTab == 2,
+            onClick = { myRoomSelectedTab = 2 },
             text = { Text("BR", style = MaterialTheme.typography.labelLarge) }
           )
         }
@@ -455,7 +480,7 @@ fun CustomScreen(
               val isMyRoomFilter = selectedFreeFireFilter == "My Room"
               val isUserHost = isProfileHost(profile)
               val isHostOrAdmin = isAdmin || isUserHost
-              val canManageInThisView = isMyRoomFilter && isHostOrAdmin
+              val canManageInThisView = isMyRoomFilter || isHostOrAdmin
 
               val roomApplications = remember(allAdminApps, myCustomProfileApplications, myAppliedCustomProfiles, profile.id) {
                 (allAdminApps + myCustomProfileApplications + myAppliedCustomProfiles).distinctBy { it.id }.filter { it.profileId == profile.id }
@@ -593,7 +618,10 @@ fun CustomScreen(
               mode = mode,
               gun = gun,
               imageUriStr = imageUriStr,
-              onSuccess = { showCreateDialog = false }
+              onSuccess = { 
+                  showCreateDialog = false
+                  viewModel.fetchCustomProfiles()
+              }
             )
         }
       }

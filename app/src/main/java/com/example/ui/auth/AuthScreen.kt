@@ -360,7 +360,13 @@ fun RegisterForm(
         OutlinedTextField(
             value = email,
             onValueChange = { email = it },
-            label = { Text("Email Address") },
+            label = { 
+                Text(
+                    if (phone.isNotBlank()) "Email Address (Optional)" 
+                    else "Email Address (or Mobile Number)"
+                ) 
+            },
+            placeholder = { Text("player@example.com") },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.AlternateEmail,
@@ -388,7 +394,13 @@ fun RegisterForm(
         OutlinedTextField(
             value = phone,
             onValueChange = { phone = it },
-            label = { Text("Mobile Number") },
+            label = { 
+                Text(
+                    if (email.isNotBlank()) "Mobile Number (Optional)" 
+                    else "Mobile Number (or Email Address)"
+                ) 
+            },
+            placeholder = { Text("10-digit mobile number") },
             leadingIcon = {
                 Icon(
                     imageVector = Icons.Default.Phone,
@@ -411,7 +423,31 @@ fun RegisterForm(
             modifier = Modifier.fillMaxWidth().testTag("input_register_phone")
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
+        Spacer(modifier = Modifier.height(6.dp))
+        if (email.isBlank() && phone.isBlank()) {
+            Text(
+                text = "ℹ Provide either Email or Mobile Number (any one required)",
+                color = SubtitleText,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        } else if (email.isNotBlank() && phone.isBlank()) {
+            Text(
+                text = "✓ Email entered (Mobile number is optional)",
+                color = GamingGreen,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        } else if (phone.isNotBlank() && email.isBlank()) {
+            Text(
+                text = "✓ Mobile number entered (Email is optional)",
+                color = GamingGreen,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(start = 4.dp)
+            )
+        }
+
+        Spacer(modifier = Modifier.height(10.dp))
 
         OutlinedTextField(
             value = password,

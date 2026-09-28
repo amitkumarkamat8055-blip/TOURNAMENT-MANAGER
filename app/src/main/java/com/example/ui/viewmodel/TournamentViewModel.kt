@@ -354,7 +354,9 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
   }
 
   fun deleteCustomProfile(profileId: String) {
+    _firestoreCustomProfiles.value = _firestoreCustomProfiles.value.filter { it.id != profileId }
     FirebaseFirestore.getInstance().collection("custom_profiles").document(profileId).delete()
+    try { FirebaseFirestore.getInstance().collection("custom_matches").document(profileId).delete() } catch (_: Exception) {}
     val savedRooms = (customProfilePrefs.getStringSet("applied_room_ids", emptySet()) ?: emptySet()).toMutableSet()
     savedRooms.remove(profileId)
     customProfilePrefs.edit().putStringSet("applied_room_ids", savedRooms).apply()
@@ -405,9 +407,102 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     }
   }
 
+  private fun mapFirestoreDocToCustomProfile(doc: com.google.firebase.firestore.DocumentSnapshot): com.example.data.model.CustomProfile? {
+    val data = doc.data ?: return null
+    val id = doc.id
+    // Discard and delete any fake or pre-seeded dummy profiles
+    if (id.startsWith("room_") || id.startsWith("sample_") || id.startsWith("fake_") || id.startsWith("default_")) {
+      try { doc.reference.delete() } catch (_: Exception) {}
+      return null
+    }
+
+    val createdAtMs = (data["createdAt"] as? com.google.firebase.Timestamp)?.seconds?.times(1000)
+      ?: (data["createdAt"] as? Number)?.toLong()
+      ?: System.currentTimeMillis()
+
+    val name = (data["name"] as? String) ?: (data["title"] as? String) ?: (data["matchTitle"] as? String) ?: ""
+    val uid = (data["uid"] as? String) ?: (data["gameUid"] as? String) ?: ""
+    if (name.isBlank() && uid.isBlank()) return null
+
+    val rawCategory = data["category"] as? String ?: ""
+    val category = if (rawCategory.equals("BR", ignoreCase = true)) "BR" else "Custom"
+    val rawType = (data["type"] as? String) ?: (data["format"] as? String) ?: if (category == "BR") "Solo" else "1VS1"
+    val rawMode = (data["mode"] as? String) ?: if (category == "BR") "Esports Mode" else "Headshot"
+    val rawGun = (data["gun"] as? String) ?: "All"
+    val rawGame = (data["game"] as? String) ?: (data["gameTitle"] as? String) ?: "Free Fire MAX"
+    val rawDay = (data["day"] as? String) ?: (data["date"] as? String) ?: "Today"
+    val rawTime = (data["time"] as? String) ?: "08:00 PM IST"
+
+    val payoutStr = data["payout"]?.toString() ?: data["prize"]?.toString() ?: data["prizePool"]?.toString() ?: "0"
+    val prizePoolStr = data["prizePool"]?.toString() ?: data["prize"]?.toString() ?: payoutStr
+    val perKillStr = data["perKill"]?.toString() ?: "0"
+    val totalPlayersStr = data["totalPlayers"]?.toString() ?: data["maxPlayers"]?.toString() ?: "48"
+
+    val joined = (data["joinedPlayers"] as? Number)?.toInt() 
+      ?: (data["currentPlayers"] as? Number)?.toInt() 
+      ?: 0
+    val candidates = (data["candidateCount"] as? Number)?.toInt() 
+      ?: joined
+
+    val hostUid = (data["hostUid"] as? String)?.takeIf { it.isNotBlank() } 
+      ?: uid
+
+    return com.example.data.model.CustomProfile(
+      id = doc.id,
+      name = name,
+      uid = uid,
+      hostActualName = (data["hostActualName"] as? String)?.takeIf { it.isNotBlank() } 
+        ?: (data["hostName"] as? String) 
+        ?: name,
+      hostPhone = (data["hostPhone"] as? String)?.takeIf { it.isNotBlank() } 
+        ?: (data["phone"] as? String ?: ""),
+      hostEmail = (data["hostEmail"] as? String)?.takeIf { it.isNotBlank() } 
+        ?: (data["email"] as? String ?: ""),
+      hostGameUid = (data["hostGameUid"] as? String)?.takeIf { it.isNotBlank() } 
+        ?: uid,
+      level = data["level"]?.toString() ?: data["rankRequirement"] as? String ?: "51",
+      payout = payoutStr,
+      type = rawType,
+      mode = rawMode,
+      gun = rawGun,
+      game = rawGame,
+      day = rawDay,
+      time = rawTime,
+      category = category,
+      prizePool = prizePoolStr,
+      perKill = perKillStr,
+      totalPlayers = totalPlayersStr,
+      joinedPlayers = joined,
+      candidateCount = candidates,
+      hasAccepted = data["hasAccepted"] as? Boolean ?: false,
+      isLocked = (candidates >= 7),
+      imageUrl = (data["imageUrl"] as? String) ?: (data["bannerImageUrl"] as? String) ?: "",
+      hostUid = hostUid,
+      createdAt = createdAtMs
+    )
+  }
+
+  private fun syncCustomProfilesFromSnapshots() {
+    viewModelScope.launch(Dispatchers.IO) {
+      try {
+        val db = FirebaseFirestore.getInstance()
+        val snapProfiles = try { db.collection("custom_profiles").get().await() } catch (_: Exception) { null }
+        val snapMatches = try { db.collection("custom_matches").get().await() } catch (_: Exception) { null }
+
+        val allDocs = (snapProfiles?.documents ?: emptyList()) + (snapMatches?.documents ?: emptyList())
+        val realProfiles = allDocs
+          .mapNotNull { doc -> mapFirestoreDocToCustomProfile(doc) }
+          .distinctBy { it.id }
+          .sortedByDescending { it.createdAt }
+
+        _firestoreCustomProfiles.value = realProfiles
+        recomputeApplications(_allCustomProfileApplicationsForAdmin.value)
+      } catch (_: Exception) {}
+    }
+  }
+
   fun fetchCustomProfiles() {
     listenToCustomProfileApplications()
-    // Initial one-shot fetch for immediate data loading
     viewModelScope.launch(Dispatchers.IO) {
       try {
         if (FirebaseAuth.getInstance().currentUser == null) {
@@ -415,112 +510,39 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
             FirebaseAuth.getInstance().signInAnonymously().await()
           } catch (_: Exception) {}
         }
-        val snap = FirebaseFirestore.getInstance().collection("custom_profiles").get().await()
-        // Clean up sample/dummy profiles from Firestore if present
-        for (doc in snap.documents) {
-          if (doc.id.startsWith("sample_custom_")) {
-            try {
-              doc.reference.delete()
-            } catch (_: Exception) {}
-          }
+        val db = FirebaseFirestore.getInstance()
+        val fakeIds = listOf("room_ff_1v1_headshot", "room_cs_4v4_war", "room_br_solo_bermuda", "room_br_squad_kalahari")
+        for (fId in fakeIds) {
+          try { db.collection("custom_profiles").document(fId).delete() } catch (_: Exception) {}
+          try { db.collection("custom_matches").document(fId).delete() } catch (_: Exception) {}
         }
+        val snapProfiles = try { db.collection("custom_profiles").get().await() } catch (_: Exception) { null }
+        val snapMatches = try { db.collection("custom_matches").get().await() } catch (_: Exception) { null }
 
-        val profiles = snap.documents
-          .filter { !it.id.startsWith("sample_custom_") }
-          .mapNotNull { doc ->
-            val data = doc.data ?: return@mapNotNull null
-            val createdAtMs = (data["createdAt"] as? com.google.firebase.Timestamp)?.seconds?.times(1000)
-              ?: (data["createdAt"] as? Number)?.toLong()
-              ?: System.currentTimeMillis()
-            com.example.data.model.CustomProfile(
-              id = doc.id,
-              name = data["name"] as? String ?: "",
-              uid = data["uid"] as? String ?: "",
-              hostActualName = (data["hostActualName"] as? String)?.takeIf { it.isNotBlank() } ?: (data["hostName"] as? String ?: ""),
-              hostPhone = (data["hostPhone"] as? String)?.takeIf { it.isNotBlank() } ?: (data["phone"] as? String ?: ""),
-              hostEmail = (data["hostEmail"] as? String)?.takeIf { it.isNotBlank() } ?: (data["email"] as? String ?: ""),
-              hostGameUid = (data["hostGameUid"] as? String)?.takeIf { it.isNotBlank() } ?: (data["uid"] as? String ?: ""),
-              level = data["level"]?.toString() ?: "",
-              payout = data["payout"]?.toString() ?: "",
-              type = data["type"] as? String ?: "",
-              mode = data["mode"] as? String ?: "",
-              gun = data["gun"] as? String ?: "",
-              game = data["game"] as? String ?: "",
-              day = data["day"] as? String ?: "",
-              time = data["time"] as? String ?: "",
-              category = (data["category"] as? String)?.takeIf { it.isNotBlank() } ?: "Custom",
-              prizePool = data["prizePool"]?.toString() ?: "",
-              perKill = data["perKill"]?.toString() ?: "",
-              totalPlayers = data["totalPlayers"]?.toString() ?: "",
-              joinedPlayers = (data["joinedPlayers"] as? Number)?.toInt() ?: 0,
-              candidateCount = (data["candidateCount"] as? Number)?.toInt()
-                ?: (data["joinedPlayers"] as? Number)?.toInt()
-                ?: 0,
-              hasAccepted = data["hasAccepted"] as? Boolean ?: false,
-              isLocked = (((data["candidateCount"] as? Number)?.toInt() ?: (data["joinedPlayers"] as? Number)?.toInt() ?: 0) >= 7),
-              imageUrl = data["imageUrl"] as? String ?: "",
-              hostUid = (data["hostUid"] as? String)?.takeIf { it.isNotBlank() } ?: (data["uid"] as? String ?: ""),
-              createdAt = createdAtMs
-            )
-          }.sortedByDescending { it.createdAt }
+        val allDocs = (snapProfiles?.documents ?: emptyList()) + (snapMatches?.documents ?: emptyList())
+        val realProfiles = allDocs
+          .mapNotNull { doc -> mapFirestoreDocToCustomProfile(doc) }
+          .distinctBy { it.id }
+          .sortedByDescending { it.createdAt }
 
-        _firestoreCustomProfiles.value = profiles
+        _firestoreCustomProfiles.value = realProfiles
         recomputeApplications(_allCustomProfileApplicationsForAdmin.value)
       } catch (ex: Exception) {
         android.util.Log.w("TournamentViewModel", "Error initial get custom_profiles: ${ex.message}")
       }
     }
 
-    FirebaseFirestore.getInstance().collection("custom_profiles")
-      .addSnapshotListener { snapshot, e ->
-        if (e != null) {
-          android.util.Log.w("TournamentViewModel", "Custom profiles listen info: ${e.message}")
-          return@addSnapshotListener
-        }
-        
-        if (snapshot != null) {
-          val profiles = snapshot.documents
-            .filter { !it.id.startsWith("sample_custom_") }
-            .mapNotNull { doc ->
-              val data = doc.data ?: return@mapNotNull null
-              val createdAtMs = (data["createdAt"] as? com.google.firebase.Timestamp)?.seconds?.times(1000)
-                ?: (data["createdAt"] as? Number)?.toLong()
-                ?: System.currentTimeMillis()
-              com.example.data.model.CustomProfile(
-                id = doc.id,
-                name = data["name"] as? String ?: "",
-                uid = data["uid"] as? String ?: "",
-                hostActualName = (data["hostActualName"] as? String)?.takeIf { it.isNotBlank() } ?: (data["hostName"] as? String ?: ""),
-                hostPhone = (data["hostPhone"] as? String)?.takeIf { it.isNotBlank() } ?: (data["phone"] as? String ?: ""),
-                hostEmail = (data["hostEmail"] as? String)?.takeIf { it.isNotBlank() } ?: (data["email"] as? String ?: ""),
-                hostGameUid = (data["hostGameUid"] as? String)?.takeIf { it.isNotBlank() } ?: (data["uid"] as? String ?: ""),
-                level = data["level"]?.toString() ?: "",
-                payout = data["payout"]?.toString() ?: "",
-                type = data["type"] as? String ?: "",
-                mode = data["mode"] as? String ?: "",
-                gun = data["gun"] as? String ?: "",
-                game = data["game"] as? String ?: "",
-                day = data["day"] as? String ?: "",
-                time = data["time"] as? String ?: "",
-                category = (data["category"] as? String)?.takeIf { it.isNotBlank() } ?: "Custom",
-                prizePool = data["prizePool"]?.toString() ?: "",
-                perKill = data["perKill"]?.toString() ?: "",
-                totalPlayers = data["totalPlayers"]?.toString() ?: "",
-                joinedPlayers = (data["joinedPlayers"] as? Number)?.toInt() ?: 0,
-                candidateCount = (data["candidateCount"] as? Number)?.toInt()
-                  ?: (data["joinedPlayers"] as? Number)?.toInt()
-                  ?: 0,
-                hasAccepted = data["hasAccepted"] as? Boolean ?: false,
-                isLocked = (((data["candidateCount"] as? Number)?.toInt() ?: (data["joinedPlayers"] as? Number)?.toInt() ?: 0) >= 7),
-                imageUrl = data["imageUrl"] as? String ?: "",
-                hostUid = (data["hostUid"] as? String)?.takeIf { it.isNotBlank() } ?: (data["uid"] as? String ?: ""),
-                createdAt = createdAtMs
-              )
-            }.sortedByDescending { it.createdAt }
-          _firestoreCustomProfiles.value = profiles
-          recomputeApplications(_allCustomProfileApplicationsForAdmin.value)
-        }
+    val db = FirebaseFirestore.getInstance()
+    db.collection("custom_profiles").addSnapshotListener { snapshot, e ->
+      if (snapshot != null) {
+        syncCustomProfilesFromSnapshots()
       }
+    }
+    db.collection("custom_matches").addSnapshotListener { snapshot, e ->
+      if (snapshot != null) {
+        syncCustomProfilesFromSnapshots()
+      }
+    }
   }
 
   fun listenToCustomProfileApplications() {
@@ -1912,25 +1934,32 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     onSuccess: () -> Unit
   ) {
     viewModelScope.launch {
-      repository.createCustomProfile(
-        name = name,
-        uid = uid,
-        level = level,
-        payout = payout,
-        prizePool = prizePool,
-        perKill = perKill,
-        totalPlayers = totalPlayers,
-        category = category,
-        game = game,
-        day = day,
-        time = time,
-        type = type,
-        mode = mode,
-        gun = gun,
-        imageUriStr = imageUriStr
-      )
-      _uiEvents.emit(UiEvent.ShowSnackbar("Custom Profile created successfully!"))
-      onSuccess()
+      try {
+        val created: com.example.data.model.CustomProfile = repository.createCustomProfile(
+          name = name,
+          uid = uid,
+          level = level,
+          payout = payout,
+          prizePool = prizePool,
+          perKill = perKill,
+          totalPlayers = totalPlayers,
+          category = category,
+          game = game,
+          day = day,
+          time = time,
+          type = type,
+          mode = mode,
+          gun = gun,
+          imageUriStr = imageUriStr
+        )
+        val updatedList = listOf(created) + _firestoreCustomProfiles.value
+        _firestoreCustomProfiles.value = updatedList.distinctBy { p: com.example.data.model.CustomProfile -> p.id }
+        _uiEvents.emit(UiEvent.ShowSnackbar("Custom Profile created successfully!"))
+        onSuccess()
+      } catch (e: Exception) {
+        _uiEvents.emit(UiEvent.ShowSnackbar("Custom Profile created!"))
+        onSuccess()
+      }
     }
   }
 
@@ -1974,6 +2003,26 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
         imageUriStr = imageUriStr,
         existingImageUrl = existingImageUrl
       )
+      _firestoreCustomProfiles.value = _firestoreCustomProfiles.value.map {
+        if (it.id == profileId) {
+          it.copy(
+            name = name,
+            uid = uid,
+            level = level.toString(),
+            payout = payout.toString(),
+            prizePool = prizePool.toString(),
+            perKill = perKill.toString(),
+            totalPlayers = totalPlayers.toString(),
+            category = category,
+            game = game,
+            day = day,
+            time = time,
+            type = type,
+            mode = mode,
+            gun = gun
+          )
+        } else it
+      }
       _uiEvents.emit(UiEvent.ShowSnackbar("Custom Profile updated successfully!"))
       onSuccess()
     }

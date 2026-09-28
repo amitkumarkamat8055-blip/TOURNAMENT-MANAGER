@@ -15,6 +15,7 @@ import com.example.data.local.entity.TournamentHistoryEntity
 import com.example.data.local.entity.UserAccountEntity
 import com.example.data.local.entity.UserProfileEntity
 import com.example.data.model.AuthStatus
+import com.example.data.model.CustomProfile
 import com.example.data.model.CustomTournament
 import com.example.data.model.MatchItem
 import com.example.data.model.MatchRegistration
@@ -1171,7 +1172,7 @@ class TournamentRepository(
     mode: String,
     gun: String,
     imageUriStr: String
-  ) {
+  ): CustomProfile {
     var imageUrl = ""
     if (imageUriStr.isNotEmpty()) {
         try {
@@ -1184,7 +1185,15 @@ class TournamentRepository(
         }
     }
     
-    val currentFirebaseUser = FirebaseAuth.getInstance().currentUser
+    var currentFirebaseUser = FirebaseAuth.getInstance().currentUser
+    if (currentFirebaseUser == null) {
+        try {
+            FirebaseAuth.getInstance().signInAnonymously().await()
+            currentFirebaseUser = FirebaseAuth.getInstance().currentUser
+        } catch (authEx: Exception) {
+            Log.w("TournamentRepo", "Anonymous auth before save custom profile: ${authEx.message}")
+        }
+    }
     val finalUid = currentFirebaseUser?.uid?.takeIf { it.isNotBlank() } ?: uid.takeIf { it.isNotBlank() } ?: "host_${System.currentTimeMillis()}"
     
     val activeSession = activeSessionDao.getActiveSession()
@@ -1194,6 +1203,9 @@ class TournamentRepository(
     val hostPhone = curAccount?.phone?.takeIf { it.isNotBlank() } ?: ""
     val hostEmail = curAccount?.email?.takeIf { it.isNotBlank() && !it.endsWith("@tourneymatch.com", ignoreCase = true) } ?: ""
     val hostGameUid = uid.ifBlank { curAccount?.gameUid ?: curProfile?.uid ?: "" }
+
+    val docRef = FirebaseFirestore.getInstance().collection("custom_profiles").document()
+    val generatedId = docRef.id
 
     val profileMap = hashMapOf(
         "name" to name,
@@ -1225,7 +1237,10 @@ class TournamentRepository(
     )
     
     try {
-        FirebaseFirestore.getInstance().collection("custom_profiles").add(profileMap).await()
+        docRef.set(profileMap).await()
+        try {
+            FirebaseFirestore.getInstance().collection("custom_matches").document(generatedId).set(profileMap).await()
+        } catch (_: Exception) {}
     } catch (e: Exception) {
         Log.e("FirestoreError", "Failed to save custom profile", e)
     }
@@ -1258,6 +1273,35 @@ class TournamentRepository(
       isJoined = true
     )
     customTournamentDao.insertCustomTournament(entity)
+
+    return CustomProfile(
+      id = generatedId,
+      name = name,
+      uid = uid,
+      hostActualName = hostActualName,
+      hostPhone = hostPhone,
+      hostEmail = hostEmail,
+      hostGameUid = hostGameUid,
+      level = level.toString(),
+      payout = payout.toString(),
+      prizePool = prizePool.toString(),
+      perKill = perKill.toString(),
+      totalPlayers = totalPlayers.toString(),
+      joinedPlayers = 0,
+      candidateCount = 0,
+      hasAccepted = false,
+      isLocked = false,
+      category = category,
+      type = type,
+      mode = mode,
+      gun = gun,
+      game = game,
+      day = day,
+      time = time,
+      imageUrl = imageUrl,
+      hostUid = finalUid,
+      createdAt = System.currentTimeMillis()
+    )
   }
 
   suspend fun updateCustomProfile(
@@ -1309,8 +1353,17 @@ class TournamentRepository(
         "imageUrl" to imageUrl
     )
     
+    if (FirebaseAuth.getInstance().currentUser == null) {
+        try {
+            FirebaseAuth.getInstance().signInAnonymously().await()
+        } catch (_: Exception) {}
+    }
+    
     try {
         FirebaseFirestore.getInstance().collection("custom_profiles").document(profileId).update(profileMap as Map<String, Any>).await()
+        try {
+            FirebaseFirestore.getInstance().collection("custom_matches").document(profileId).set(profileMap as Map<String, Any>, com.google.firebase.firestore.SetOptions.merge()).await()
+        } catch (_: Exception) {}
     } catch (e: Exception) {
         Log.e("FirestoreError", "Failed to update custom profile", e)
     }

@@ -134,6 +134,23 @@ fun CreateProfileTournamentDialog(
   var specificGunExpanded by remember { mutableStateOf(false) }
   var bodyHeadshotExpanded by remember { mutableStateOf(false) }
   
+  val context = androidx.compose.ui.platform.LocalContext.current
+  val currentCalendar = remember { java.util.Calendar.getInstance() }
+  val datePickerDialog = remember {
+      android.app.DatePickerDialog(
+          context,
+          { _, year, month, dayOfMonth ->
+              val selectedCal = java.util.Calendar.getInstance()
+              selectedCal.set(year, month, dayOfMonth)
+              val formattedDate = java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(selectedCal.time)
+              day = formattedDate
+          },
+          currentCalendar.get(java.util.Calendar.YEAR),
+          currentCalendar.get(java.util.Calendar.MONTH),
+          currentCalendar.get(java.util.Calendar.DAY_OF_MONTH)
+      )
+  }
+
   val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
       imageUri = uri
   }
@@ -292,62 +309,64 @@ fun CreateProfileTournamentDialog(
             }
         }
 
-        // Day Selection (Today & Tomorrow) and Match Time
-        Column(
+        // Match Schedule: Date & Time Dropdowns
+        Row(
             modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(6.dp)
+            horizontalArrangement = Arrangement.spacedBy(8.dp)
         ) {
-            Text(
-                text = "Match Schedule",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalAlignment = Alignment.CenterVertically
+            // Date / Day Dropdown with Date Selection
+            ExposedDropdownMenuBox(
+                expanded = dayExpanded,
+                onExpandedChange = { dayExpanded = !dayExpanded },
+                modifier = Modifier.weight(1f)
             ) {
-                // Two options for Day: Today & Tomorrow
-                Row(
-                    modifier = Modifier.weight(1f),
-                    horizontalArrangement = Arrangement.spacedBy(6.dp)
-                ) {
-                    listOf("Today", "Tomorrow").forEach { dayOpt ->
-                        FilterChip(
-                            selected = day.equals(dayOpt, ignoreCase = true),
-                            onClick = { day = dayOpt },
-                            label = {
-                                Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                    Text(dayOpt, fontSize = 12.sp)
-                                }
-                            },
-                            leadingIcon = if (day.equals(dayOpt, ignoreCase = true)) {
-                                { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(14.dp)) }
-                            } else null,
-                            modifier = Modifier.weight(1f)
+                OutlinedTextField(
+                    value = day,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("DATE") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dayExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(expanded = dayExpanded, onDismissRequest = { dayExpanded = false }) {
+                    dayOptions.forEach { option ->
+                        DropdownMenuItem(
+                            text = { Text(option) },
+                            onClick = {
+                                day = option
+                                dayExpanded = false
+                            }
                         )
                     }
-                }
-
-                // Match Time Dropdown
-                ExposedDropdownMenuBox(
-                    expanded = timeExpanded,
-                    onExpandedChange = { timeExpanded = !timeExpanded },
-                    modifier = Modifier.weight(1f)
-                ) {
-                    OutlinedTextField(
-                        value = time,
-                        onValueChange = {},
-                        readOnly = true,
-                        label = { Text("TIME") },
-                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = timeExpanded) },
-                        modifier = Modifier.fillMaxWidth().menuAnchor()
-                    )
-                    ExposedDropdownMenu(expanded = timeExpanded, onDismissRequest = { timeExpanded = false }) {
-                        timeOptions.forEach { option ->
-                            DropdownMenuItem(text = { Text(option) }, onClick = { time = option; timeExpanded = false })
+                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
+                    DropdownMenuItem(
+                        text = { Text("Pick Other Date...") },
+                        leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(18.dp)) },
+                        onClick = {
+                            dayExpanded = false
+                            datePickerDialog.show()
                         }
+                    )
+                }
+            }
+
+            // Match Time Dropdown
+            ExposedDropdownMenuBox(
+                expanded = timeExpanded,
+                onExpandedChange = { timeExpanded = !timeExpanded },
+                modifier = Modifier.weight(1f)
+            ) {
+                OutlinedTextField(
+                    value = time,
+                    onValueChange = {},
+                    readOnly = true,
+                    label = { Text("TIME") },
+                    trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = timeExpanded) },
+                    modifier = Modifier.fillMaxWidth().menuAnchor()
+                )
+                ExposedDropdownMenu(expanded = timeExpanded, onDismissRequest = { timeExpanded = false }) {
+                    timeOptions.forEach { option ->
+                        DropdownMenuItem(text = { Text(option) }, onClick = { time = option; timeExpanded = false })
                     }
                 }
             }
@@ -399,50 +418,14 @@ fun CreateProfileTournamentDialog(
                 }
             }
         }
-        
-        // Type / Format Selection Chips
-        Column(
-            modifier = Modifier.fillMaxWidth(),
-            verticalArrangement = Arrangement.spacedBy(4.dp)
-        ) {
-            Text(
-                text = if (category == "BR") "Format (Solo / Duo / Squad)" else "Match Type",
-                style = MaterialTheme.typography.labelMedium,
-                fontWeight = FontWeight.SemiBold,
-                modifier = Modifier.align(Alignment.Start)
-            )
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                typeOptions.forEach { opt ->
-                    FilterChip(
-                        selected = type.equals(opt, ignoreCase = true),
-                        onClick = { type = opt },
-                        label = {
-                            Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                Text(
-                                    text = opt,
-                                    fontWeight = if (type.equals(opt, ignoreCase = true)) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
-                        },
-                        leadingIcon = if (type.equals(opt, ignoreCase = true)) {
-                            { Icon(Icons.Default.Check, contentDescription = null, modifier = Modifier.size(16.dp)) }
-                        } else null,
-                        modifier = Modifier.weight(1f)
-                    )
-                }
-            }
-        }
 
-        // Dropdowns
+        // Type Dropdown
         ExposedDropdownMenuBox(expanded = typeExpanded, onExpandedChange = { typeExpanded = !typeExpanded }) {
             OutlinedTextField(
                 value = type,
                 onValueChange = {},
                 readOnly = true,
-                label = { Text("TYPE") },
+                label = { Text(if (category == "BR") "FORMAT (TYPE)" else "TYPE") },
                 trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = typeExpanded) },
                 modifier = Modifier.fillMaxWidth().menuAnchor()
             )

@@ -11,30 +11,52 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
+    env:
+      GRADLE_OPTS: "-Djava.awt.headless=true -Dawt.toolkit=sun.awt.HToolkit"
+      JAVA_TOOL_OPTIONS: "-Djava.awt.headless=true"
 
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      - name: Set up JDK 17
+      - name: Set up JDK 21 (Temurin)
         uses: actions/setup-java@v4
         with:
-          java-version: '17'
+          java-version: '21'
           distribution: 'temurin'
 
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Create debug.keystore and environment
+        run: |
+          mkdir -p ~/.android
+          keytool -genkey -v -keystore ~/.android/debug.keystore \
+            -alias androiddebugkey \
+            -storepass android \
+            -keypass android \
+            -keyalg RSA \
+            -keysize 2048 \
+            -validity 10000 \
+            -dname "CN=Android Debug,O=Android,C=US"
+          cp ~/.android/debug.keystore "${GITHUB_WORKSPACE}/debug.keystore"
+          touch .env
+          touch .env.example
+
       - name: Setup Gradle
-        uses: gradle/actions/setup-gradle@v3
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.3.1'
 
       - name: Build Debug APK
         run: |
-          if [ -f "./gradlew" ]; then
-            chmod +x gradlew
-            ./gradlew assembleDebug --stacktrace
-          else
-            gradle assembleDebug --stacktrace
-          fi
+          gradle :app:assembleDebug -x test --stacktrace
+
+      - name: Prepare APK for Release
+        run: |
           mkdir -p release_apk
-          cp app/build/outputs/apk/debug/*.apk release_apk/TournamentApp.apk
+          find app/build/outputs/apk/debug -name "*.apk" -exec cp {} release_apk/TournamentApp.apk \;
+          ls -la release_apk/
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
@@ -43,7 +65,7 @@ jobs:
           path: release_apk/TournamentApp.apk
           retention-days: 30
 
-      - name: Create GitHub Release with Direct APK Download Link
+      - name: Create or Update GitHub Release
         uses: softprops/action-gh-release@v2
         if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
         with:
