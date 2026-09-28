@@ -65,15 +65,20 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
 
     // Ensure database initial data and active session are populated on startup
     viewModelScope.launch(Dispatchers.IO) {
-      repository.ensureAdminAccount()
-      if (FirebaseAuth.getInstance().currentUser == null) {
-        try {
-          FirebaseAuth.getInstance().signInAnonymously().await()
-        } catch (_: Exception) {}
-      }
-      val currentAuthUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-      if (currentAuthUid.isNotBlank()) {
-        repository.syncSessionForFirebaseUser(currentAuthUid)
+      try {
+        repository.ensureAdminAccount()
+        val auth = try { FirebaseAuth.getInstance() } catch (e: Exception) { null }
+        if (auth != null && auth.currentUser == null) {
+          try {
+            auth.signInAnonymously().await()
+          } catch (_: Exception) {}
+        }
+        val currentAuthUid = auth?.currentUser?.uid ?: ""
+        if (currentAuthUid.isNotBlank()) {
+          repository.syncSessionForFirebaseUser(currentAuthUid)
+        }
+      } catch (e: Exception) {
+        android.util.Log.e("TournamentViewModel", "Session sync error: ${e.message}")
       }
       try {
         val deletedDocs = try {
@@ -129,14 +134,18 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
       }
     }
 
-    FirebaseAuth.getInstance().addAuthStateListener { auth ->
-      val uid = auth.currentUser?.uid ?: ""
-      if (uid.isNotBlank()) {
-        viewModelScope.launch(Dispatchers.IO) {
-          repository.syncSessionForFirebaseUser(uid)
-          refreshWalletTransactions()
+    try {
+      FirebaseAuth.getInstance().addAuthStateListener { auth ->
+        val uid = auth.currentUser?.uid ?: ""
+        if (uid.isNotBlank()) {
+          viewModelScope.launch(Dispatchers.IO) {
+            repository.syncSessionForFirebaseUser(uid)
+            refreshWalletTransactions()
+          }
         }
       }
+    } catch (e: Exception) {
+      android.util.Log.e("TournamentViewModel", "FirebaseAuth listener error: ${e.message}")
     }
   }
 
