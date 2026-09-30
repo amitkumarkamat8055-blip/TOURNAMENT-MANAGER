@@ -327,12 +327,12 @@ fun RegisterForm(
     onSwitchToLogin: () -> Unit
 ) {
     var name by remember { mutableStateOf("") }
-    var email by remember { mutableStateOf("") }
-    var phone by remember { mutableStateOf("") }
+    var phoneOrEmail by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var confirmPassword by remember { mutableStateOf("") }
     var passwordVisible by remember { mutableStateOf(false) }
     val focusManager = LocalFocusManager.current
+    val isDigits = phoneOrEmail.all { it.isDigit() || it == '+' || it == ' ' } && phoneOrEmail.any { it.isDigit() }
 
     Column(modifier = Modifier.fillMaxWidth()) {
         OutlinedTextField(
@@ -358,18 +358,13 @@ fun RegisterForm(
         Spacer(modifier = Modifier.height(16.dp))
 
         OutlinedTextField(
-            value = email,
-            onValueChange = { email = it },
-            label = { 
-                Text(
-                    if (phone.isNotBlank()) "Email Address (Optional)" 
-                    else "Email Address (or Mobile Number)"
-                ) 
-            },
-            placeholder = { Text("player@example.com") },
+            value = phoneOrEmail,
+            onValueChange = { phoneOrEmail = it },
+            label = { Text("Email Address or Mobile Number") },
+            placeholder = { Text("Enter email or mobile number") },
             leadingIcon = {
                 Icon(
-                    imageVector = Icons.Default.AlternateEmail,
+                    imageVector = if (isDigits) Icons.Default.Phone else Icons.Default.AlternateEmail,
                     contentDescription = null,
                     tint = GamingGreen
                 )
@@ -386,68 +381,18 @@ fun RegisterForm(
                 focusedTextColor = LightText,
                 unfocusedTextColor = LightText
             ),
-            modifier = Modifier.fillMaxWidth().testTag("input_register_email")
+            modifier = Modifier.fillMaxWidth().testTag("input_register_identifier")
         )
 
-        Spacer(modifier = Modifier.height(16.dp))
-
-        OutlinedTextField(
-            value = phone,
-            onValueChange = { phone = it },
-            label = { 
-                Text(
-                    if (email.isNotBlank()) "Mobile Number (Optional)" 
-                    else "Mobile Number (or Email Address)"
-                ) 
-            },
-            placeholder = { Text("10-digit mobile number") },
-            leadingIcon = {
-                Icon(
-                    imageVector = Icons.Default.Phone,
-                    contentDescription = null,
-                    tint = GamingGreen
-                )
-            },
-            singleLine = true,
-            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Phone, imeAction = ImeAction.Next),
-            keyboardActions = KeyboardActions(onNext = { focusManager.moveFocus(FocusDirection.Down) }),
-            shape = RoundedCornerShape(12.dp),
-            colors = OutlinedTextFieldDefaults.colors(
-                focusedBorderColor = GamingGreen,
-                unfocusedBorderColor = Color.DarkGray,
-                focusedLabelColor = GamingGreen,
-                unfocusedLabelColor = SubtitleText,
-                focusedTextColor = LightText,
-                unfocusedTextColor = LightText
-            ),
-            modifier = Modifier.fillMaxWidth().testTag("input_register_phone")
+        Spacer(modifier = Modifier.height(4.dp))
+        Text(
+            text = "ℹ Enter either your Email Address or Mobile Number",
+            color = SubtitleText,
+            fontSize = 12.sp,
+            modifier = Modifier.padding(start = 4.dp)
         )
 
-        Spacer(modifier = Modifier.height(6.dp))
-        if (email.isBlank() && phone.isBlank()) {
-            Text(
-                text = "ℹ Provide either Email or Mobile Number (any one required)",
-                color = SubtitleText,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 4.dp)
-            )
-        } else if (email.isNotBlank() && phone.isBlank()) {
-            Text(
-                text = "✓ Email entered (Mobile number is optional)",
-                color = GamingGreen,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 4.dp)
-            )
-        } else if (phone.isNotBlank() && email.isBlank()) {
-            Text(
-                text = "✓ Mobile number entered (Email is optional)",
-                color = GamingGreen,
-                fontSize = 12.sp,
-                modifier = Modifier.padding(start = 4.dp)
-            )
-        }
-
-        Spacer(modifier = Modifier.height(10.dp))
+        Spacer(modifier = Modifier.height(14.dp))
 
         OutlinedTextField(
             value = password,
@@ -491,7 +436,11 @@ fun RegisterForm(
             keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password, imeAction = ImeAction.Done),
             keyboardActions = KeyboardActions(onDone = {
                 focusManager.clearFocus()
-                if (name.isNotBlank() && (email.isNotBlank() || phone.isNotBlank()) && password.length >= 6 && password == confirmPassword) {
+                if (name.isNotBlank() && phoneOrEmail.isNotBlank() && password.length >= 6 && password == confirmPassword) {
+                    val trimmed = phoneOrEmail.trim()
+                    val isEmail = trimmed.contains("@")
+                    val email = if (isEmail) trimmed else ""
+                    val phone = if (!isEmail) trimmed else ""
                     onRegister(name, email, phone, password)
                 }
             }),
@@ -519,12 +468,16 @@ fun RegisterForm(
 
         Spacer(modifier = Modifier.height(24.dp))
 
-        val isValid = name.isNotBlank() && (email.isNotBlank() || phone.isNotBlank()) && 
+        val isValid = name.isNotBlank() && phoneOrEmail.isNotBlank() && 
                       password.length >= 6 && password == confirmPassword
 
         Button(
             onClick = {
                 focusManager.clearFocus()
+                val trimmed = phoneOrEmail.trim()
+                val isEmail = trimmed.contains("@")
+                val email = if (isEmail) trimmed else ""
+                val phone = if (!isEmail) trimmed else ""
                 onRegister(name, email, phone, password)
             },
             enabled = !isLoading && isValid,

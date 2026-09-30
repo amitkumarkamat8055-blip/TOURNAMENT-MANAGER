@@ -166,6 +166,7 @@ data class CustomProfileApplication(
   val hostUid: String = "",
   val candidateName: String = "",
   val phone: String = "",
+  val email: String = "",
   val uid: String = "",
   val level: String = "",
   val rank: String = "",

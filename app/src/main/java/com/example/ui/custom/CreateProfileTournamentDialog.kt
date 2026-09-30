@@ -69,19 +69,28 @@ fun CreateProfileTournamentDialog(
   var category by remember { mutableStateOf(if (profileToEdit?.category?.isNotBlank() == true) profileToEdit.category else "Custom") }
   
   val dayOptions = remember {
-      val options = mutableListOf("Today", "Tomorrow")
       val calendar = java.util.Calendar.getInstance()
-      calendar.add(java.util.Calendar.DAY_OF_YEAR, 2)
       val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
-      for (i in 2..14) {
-          options.add(dateFormat.format(calendar.time))
-          calendar.add(java.util.Calendar.DAY_OF_YEAR, 1)
-      }
-      options
+      listOf(dateFormat.format(calendar.time))
   }
   
   var game by remember { mutableStateOf(if (profileToEdit?.game?.isNotBlank() == true) profileToEdit.game else "Lone Wolf") }
-  var day by remember { mutableStateOf(if (profileToEdit?.day?.isNotBlank() == true) profileToEdit.day else dayOptions.first()) }
+  var day by remember { 
+      mutableStateOf(
+          if (profileToEdit?.day?.isNotBlank() == true) {
+              val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
+              val cal = java.util.Calendar.getInstance()
+              when (profileToEdit.day) {
+                  "Today" -> dateFormat.format(cal.time)
+                  "Tomorrow" -> {
+                      cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                      dateFormat.format(cal.time)
+                  }
+                  else -> profileToEdit.day
+              }
+          } else dayOptions.first()
+      ) 
+  }
   var time by remember { mutableStateOf(if (profileToEdit?.time?.isNotBlank() == true) profileToEdit.time else "10:00 AM") }
   var type by remember { mutableStateOf(if (profileToEdit?.type?.isNotBlank() == true) profileToEdit.type else "1VS1") }
   var mode by remember { mutableStateOf(
@@ -135,22 +144,6 @@ fun CreateProfileTournamentDialog(
   var bodyHeadshotExpanded by remember { mutableStateOf(false) }
   
   val context = androidx.compose.ui.platform.LocalContext.current
-  val currentCalendar = remember { java.util.Calendar.getInstance() }
-  val datePickerDialog = remember {
-      android.app.DatePickerDialog(
-          context,
-          { _, year, month, dayOfMonth ->
-              val selectedCal = java.util.Calendar.getInstance()
-              selectedCal.set(year, month, dayOfMonth)
-              val formattedDate = java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(selectedCal.time)
-              day = formattedDate
-          },
-          currentCalendar.get(java.util.Calendar.YEAR),
-          currentCalendar.get(java.util.Calendar.MONTH),
-          currentCalendar.get(java.util.Calendar.DAY_OF_MONTH)
-      )
-  }
-
   val launcher = rememberLauncherForActivityResult(ActivityResultContracts.GetContent()) { uri: Uri? ->
       imageUri = uri
   }
@@ -338,15 +331,6 @@ fun CreateProfileTournamentDialog(
                             }
                         )
                     }
-                    HorizontalDivider(modifier = Modifier.padding(vertical = 4.dp))
-                    DropdownMenuItem(
-                        text = { Text("Pick Other Date...") },
-                        leadingIcon = { Icon(Icons.Default.DateRange, contentDescription = null, modifier = Modifier.size(18.dp)) },
-                        onClick = {
-                            dayExpanded = false
-                            datePickerDialog.show()
-                        }
-                    )
                 }
             }
 

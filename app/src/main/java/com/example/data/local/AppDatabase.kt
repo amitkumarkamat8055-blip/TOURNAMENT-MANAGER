@@ -315,9 +315,7 @@ abstract class AppDatabase : RoomDatabase() {
           isRoomBroadcasted = false
         )
       )
-      if (includeMatches) {
-        matchDao.insertMatches(sampleMatches)
-      }
+      // Matches are strictly created and managed by the Admin in Firestore. No dummy sample matches are seeded.
 
       // Initial Custom Tournaments (Numbered 1, 2, 3... and 4 or more)
       val sampleCustoms = listOf(

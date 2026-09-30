@@ -134,6 +134,7 @@ fun MatchesScreen(
   if (showCreateMatchDialog) {
     CreateOrEditMatchDialog(
       existingMatch = null,
+      defaultCategory = if (selectedTab == 0) "Daily" else "Weekly",
       onDismiss = { showCreateMatchDialog = false },
       onSave = { name, game, cat, fee, prize, maxP, date, time, format, map, rules, perKill, bannerUrl ->
         viewModel.createTournamentMatch(name, game, cat, fee, prize, maxP, date, time, format, map, rules, perKill, bannerUrl) {
@@ -318,6 +319,9 @@ fun MatchesScreen(
     if (displayMatches.isEmpty()) {
       EmptyMatchesView(
         isFiltered = searchQuery.isNotBlank() || selectedStatus != "All",
+        sectionTitle = if (selectedTab == 0) "Daily" else "Weekly",
+        isAdmin = isAdmin,
+        onCreateMatch = { showCreateMatchDialog = true },
         onResetFilter = {
           viewModel.setMatchSearchQuery("")
           viewModel.setSelectedStatus("All")
@@ -927,6 +931,9 @@ fun MatchCard(
 @Composable
 fun EmptyMatchesView(
   isFiltered: Boolean,
+  sectionTitle: String = "Daily",
+  isAdmin: Boolean = false,
+  onCreateMatch: () -> Unit = {},
   onResetFilter: () -> Unit,
   modifier: Modifier = Modifier
 ) {
@@ -947,13 +954,13 @@ fun EmptyMatchesView(
       Icon(
         imageVector = Icons.Default.SportsEsports,
         contentDescription = "No Matches",
-        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+        tint = MaterialTheme.colorScheme.primary,
         modifier = Modifier.size(36.dp)
       )
     }
     Spacer(modifier = Modifier.height(16.dp))
     Text(
-      text = if (isFiltered) "No Matches Found" else "No Active Matches Available",
+      text = if (isFiltered) "No Matches Found" else "No $sectionTitle Matches Available",
       style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
       color = MaterialTheme.colorScheme.onBackground
     )
@@ -962,7 +969,7 @@ fun EmptyMatchesView(
       text = if (isFiltered)
         "Try changing your search query or selected category filter."
       else
-        "New tournaments and scrim matches will be hosted shortly. Stay tuned!",
+        "No $sectionTitle matches have been created yet. When the admin hosts a $sectionTitle match, it will appear here.",
       style = MaterialTheme.typography.bodyMedium,
       color = MaterialTheme.colorScheme.onSurfaceVariant,
       textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -975,6 +982,18 @@ fun EmptyMatchesView(
         modifier = Modifier.testTag("reset_match_filter_button")
       ) {
         Text("Clear Filters")
+      }
+    } else if (isAdmin) {
+      Spacer(modifier = Modifier.height(20.dp))
+      Button(
+        onClick = onCreateMatch,
+        shape = RoundedCornerShape(12.dp),
+        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
+        modifier = Modifier.testTag("empty_view_create_match_button")
+      ) {
+        Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(modifier = Modifier.width(8.dp))
+        Text("Create $sectionTitle Match")
       }
     }
   }

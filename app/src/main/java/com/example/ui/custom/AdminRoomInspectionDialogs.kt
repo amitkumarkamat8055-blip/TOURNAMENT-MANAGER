@@ -90,7 +90,8 @@ fun AdminCandidatesInspectionDialog(
     var appForSendCredentials by remember { mutableStateOf<CustomProfileApplication?>(null) }
     var candidateToDelete by remember { mutableStateOf<CustomProfileApplication?>(null) }
     var candidateToReject by remember { mutableStateOf<CustomProfileApplication?>(null) }
-    var selectedFilterIndex by remember { mutableIntStateOf(0) } // 0 = All, 1 = Accepted, 2 = Pending
+    var selectedFilterIndex by remember { mutableIntStateOf(0) } // 0 = All Candidates, 1 = Accepted
+    val candidateContactMap = remember { mutableStateMapOf<String, Pair<String, String>>() }
 
     val hostUidToDisplay = profile.uid.ifBlank { profile.hostUid }
     val hostPaidAny = applications.any { it.hostPaid }
@@ -146,9 +147,35 @@ fun AdminCandidatesInspectionDialog(
         }
     }
 
+    LaunchedEffect(applications) {
+        val uids = applications.flatMap { listOf(it.applicantUid, it.uid) }.filter { it.isNotBlank() }.distinct()
+        if (uids.isNotEmpty()) {
+            val db = FirebaseFirestore.getInstance()
+            uids.forEach { uId ->
+                if (!candidateContactMap.containsKey(uId)) {
+                    try {
+                        val d = db.collection("users").document(uId).get().await()
+                        if (d.exists()) {
+                            val em = d.getString("email")?.takeIf { !it.endsWith("@tourneymatch.com", ignoreCase = true) } ?: ""
+                            val ph = d.getString("phoneNumber") ?: d.getString("phone") ?: ""
+                            candidateContactMap[uId] = Pair(em, ph)
+                        } else {
+                            val q = db.collection("users").whereEqualTo("gameUid", uId).limit(1).get().await()
+                            if (!q.isEmpty) {
+                                val doc = q.documents[0]
+                                val em = doc.getString("email")?.takeIf { !it.endsWith("@tourneymatch.com", ignoreCase = true) } ?: ""
+                                val ph = doc.getString("phoneNumber") ?: doc.getString("phone") ?: ""
+                                candidateContactMap[uId] = Pair(em, ph)
+                            }
+                        }
+                    } catch (_: Exception) {}
+                }
+            }
+        }
+    }
+
     val filteredApplications = when (selectedFilterIndex) {
         1 -> applications.filter { it.status.equals("Accepted", ignoreCase = true) || it.status.equals("Paid", ignoreCase = true) }
-        2 -> applications.filter { it.status.equals("Pending", ignoreCase = true) }
         else -> applications
     }
 
@@ -296,38 +323,6 @@ fun AdminCandidatesInspectionDialog(
                                 tint = MaterialTheme.colorScheme.primary
                             )
                         }
-                        if (profile.level.isNotBlank()) {
-                            Text(
-                                text = "• Level: ${profile.level}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    }
-
-                    Spacer(modifier = Modifier.height(4.dp))
-
-                    Text(
-                        text = "Match: ${profile.game} • ${profile.category} • ${profile.type} • Mode: ${profile.mode} • Gun: ${profile.gun.ifBlank { "All Guns" }}",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
-
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        Text(
-                            text = "Schedule: ${profile.day} at ${profile.time}",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                            text = "Payout: ₹${profile.payout}",
-                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                            color = SuccessGreen
-                        )
                     }
 
                     // Admin Host Payment Action (Toggle)
@@ -496,7 +491,7 @@ fun AdminCandidatesInspectionDialog(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // 3. Filter Chips (All, Accepted, Pending)
+            // 3. Filter Chips (All Candidates, Accepted)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -504,17 +499,14 @@ fun AdminCandidatesInspectionDialog(
                 FilterChip(
                     selected = selectedFilterIndex == 0,
                     onClick = { selectedFilterIndex = 0 },
-                    label = { Text("All Candidates (${applications.size})") }
+                    label = { Text("All Candidates (${applications.size})") },
+                    modifier = Modifier.weight(1f)
                 )
                 FilterChip(
                     selected = selectedFilterIndex == 1,
                     onClick = { selectedFilterIndex = 1 },
-                    label = { Text("Accepted (${applications.count { it.status.equals("Accepted", ignoreCase = true) || it.status.equals("Paid", ignoreCase = true) }})") }
-                )
-                FilterChip(
-                    selected = selectedFilterIndex == 2,
-                    onClick = { selectedFilterIndex = 2 },
-                    label = { Text("Pending (${applications.count { it.status.equals("Pending", ignoreCase = true) }})") }
+                    label = { Text("Accepted (${applications.count { it.status.equals("Accepted", ignoreCase = true) || it.status.equals("Paid", ignoreCase = true) }})") },
+                    modifier = Modifier.weight(1f)
                 )
             }
 
@@ -661,8 +653,48 @@ fun AdminCandidatesInspectionDialog(
                                                 }
                                             }
 
+                                            val candEmail = app.email.ifBlank {
+                                                if (app.phone.contains("@")) app.phone
+                                                else candidateContactMap[app.applicantUid]?.first?.takeIf { it.isNotBlank() }
+                                                    ?: candidateContactMap[app.uid]?.first?.takeIf { it.isNotBlank() }
+                                                    ?: ""
+                                            }
+                                            val candPhone = app.phone.takeIf { !it.contains("@") && it.isNotBlank() }
+                                                ?: candidateContactMap[app.applicantUid]?.second?.takeIf { it.isNotBlank() }
+                                                ?: candidateContactMap[app.uid]?.second?.takeIf { it.isNotBlank() }
+                                                ?: ""
+
+                                            // Email ID with copy button
+                                            if (candEmail.isNotBlank()) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Icon(
+                                                        Icons.Default.Email,
+                                                        contentDescription = null,
+                                                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                                        modifier = Modifier.size(13.dp)
+                                                    )
+                                                    Text(
+                                                        text = candEmail,
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                    IconButton(
+                                                        onClick = {
+                                                            clipboard.setPrimaryClip(ClipData.newPlainText("Candidate Email", candEmail))
+                                                            Toast.makeText(context, "Email copied: $candEmail", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        modifier = Modifier.size(16.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy Email", modifier = Modifier.size(11.dp))
+                                                    }
+                                                }
+                                            }
+
                                             // Phone number with copy and call dialer
-                                            if (app.phone.isNotBlank()) {
+                                            if (candPhone.isNotBlank()) {
                                                 Row(
                                                     verticalAlignment = Alignment.CenterVertically,
                                                     horizontalArrangement = Arrangement.spacedBy(4.dp)
@@ -674,14 +706,14 @@ fun AdminCandidatesInspectionDialog(
                                                         modifier = Modifier.size(13.dp)
                                                     )
                                                     Text(
-                                                        text = app.phone,
+                                                        text = candPhone,
                                                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
                                                         color = MaterialTheme.colorScheme.primary
                                                     )
                                                     IconButton(
                                                         onClick = {
-                                                            clipboard.setPrimaryClip(ClipData.newPlainText("Candidate Phone", app.phone))
-                                                            Toast.makeText(context, "Phone copied: ${app.phone}", Toast.LENGTH_SHORT).show()
+                                                            clipboard.setPrimaryClip(ClipData.newPlainText("Candidate Phone", candPhone))
+                                                            Toast.makeText(context, "Phone copied: $candPhone", Toast.LENGTH_SHORT).show()
                                                         },
                                                         modifier = Modifier.size(16.dp)
                                                     ) {
@@ -690,7 +722,7 @@ fun AdminCandidatesInspectionDialog(
                                                     IconButton(
                                                         onClick = {
                                                             try {
-                                                                val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:${app.phone}"))
+                                                                val callIntent = Intent(Intent.ACTION_DIAL, Uri.parse("tel:$candPhone"))
                                                                 context.startActivity(callIntent)
                                                             } catch (e: Exception) {
                                                                 Toast.makeText(context, "Unable to launch dialer", Toast.LENGTH_SHORT).show()

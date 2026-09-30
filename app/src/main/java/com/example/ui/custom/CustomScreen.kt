@@ -479,8 +479,9 @@ fun CustomScreen(
             ) {
               val isMyRoomFilter = selectedFreeFireFilter == "My Room"
               val isUserHost = isProfileHost(profile)
-              val isHostOrAdmin = isAdmin || isUserHost
-              val canManageInThisView = isMyRoomFilter || isHostOrAdmin
+              // Delete and Edit icons should NEVER appear in Custom filter for any user or admin
+              val showEditAndDelete = isMyRoomFilter && isUserHost
+              val isHostOwnRoom = isMyRoomFilter && isUserHost && !isAdmin
 
               val roomApplications = remember(allAdminApps, myCustomProfileApplications, myAppliedCustomProfiles, profile.id) {
                 (allAdminApps + myCustomProfileApplications + myAppliedCustomProfiles).distinctBy { it.id }.filter { it.profileId == profile.id }
@@ -512,13 +513,13 @@ fun CustomScreen(
                         profileToJoin = profile 
                     }
                 },
-                onViewCandidatesClick = if (canManageInThisView) { { selectedRoomForCandidates = profile } } else null,
-                onSendCredentialsClick = if (canManageInThisView) { { selectedRoomForSendingCredentials = profile } } else null,
-                onSubmit = if (canManageInThisView) { { profileToSubmit = profile } } else null,
-                onEdit = if (canManageInThisView) { { profileToEdit = profile; showCreateDialog = true } } else null,
-                onDelete = if (canManageInThisView) { { profileToDelete = profile } } else null,
+                onViewCandidatesClick = if (isHostOwnRoom) { { selectedRoomForCandidates = profile } } else null,
+                onSendCredentialsClick = if (isHostOwnRoom) { { selectedRoomForSendingCredentials = profile } } else null,
+                onSubmit = if (isHostOwnRoom) { { profileToSubmit = profile } } else null,
+                onEdit = if (showEditAndDelete) { { profileToEdit = profile; showCreateDialog = true } } else null,
+                onDelete = if (showEditAndDelete) { { profileToDelete = profile } } else null,
                 isJoined = isRoomJoined,
-                isOwnRoom = canManageInThisView,
+                isOwnRoom = isHostOwnRoom,
                 isHostUser = isUserHost,
                 isAdmin = isAdmin,
                 candidateCountBadge = roomApplications.size,
@@ -718,7 +719,9 @@ fun CustomScreen(
   }
 
   if (adminInspectionCandidatesProfile != null) {
-      val roomApps = allAdminApps.filter { it.profileId == adminInspectionCandidatesProfile!!.id }
+      val roomApps = (allAdminApps + myCustomProfileApplications + myAppliedCustomProfiles)
+          .distinctBy { it.id }
+          .filter { it.profileId == adminInspectionCandidatesProfile!!.id }
       AdminCandidatesInspectionDialog(
           profile = adminInspectionCandidatesProfile!!,
           applications = roomApps,
@@ -742,7 +745,9 @@ fun CustomScreen(
   }
 
   if (adminInspectionResultsProfile != null) {
-      val roomApps = allAdminApps.filter { it.profileId == adminInspectionResultsProfile!!.id }
+      val roomApps = (allAdminApps + myCustomProfileApplications + myAppliedCustomProfiles)
+          .distinctBy { it.id }
+          .filter { it.profileId == adminInspectionResultsProfile!!.id }
       AdminResultsAndReportsDialog(
           profile = adminInspectionResultsProfile!!,
           applications = roomApps,
@@ -1407,11 +1412,11 @@ fun CustomProfileCard(
   todayCal.add(java.util.Calendar.DAY_OF_YEAR, 1)
   val tomorrowString = dateFormat.format(todayCal.time)
 
-  val dayDisplay = when (profile.day) {
-      "Today" -> "Today, $todayString"
-      "Tomorrow" -> "Tomorrow, $tomorrowString"
-      todayString -> "Today, ${profile.day}"
-      tomorrowString -> "Tomorrow, ${profile.day}"
+  val dayDisplay = when {
+      profile.day == "Today" -> todayString
+      profile.day == "Tomorrow" -> tomorrowString
+      profile.day.startsWith("Today, ") -> profile.day.removePrefix("Today, ")
+      profile.day.startsWith("Tomorrow, ") -> profile.day.removePrefix("Tomorrow, ")
       else -> profile.day
   }
   
@@ -1462,29 +1467,44 @@ fun CustomProfileCard(
             overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
           )
 
-          val hostDisplayName = profile.hostActualName.ifBlank { profile.name }
-          val hostPhoneOrEmail = profile.hostPhone.ifBlank { profile.hostEmail }
-          if (hostDisplayName.isNotBlank() || hostPhoneOrEmail.isNotBlank()) {
+          if (isAdmin) {
+              val hostDisplayName = profile.hostActualName.ifBlank { profile.name }
+              val hostPhoneOrEmail = profile.hostPhone.ifBlank { profile.hostEmail }
+              if (hostDisplayName.isNotBlank() || hostPhoneOrEmail.isNotBlank()) {
+                  Row(
+                      verticalAlignment = Alignment.CenterVertically,
+                      horizontalArrangement = Arrangement.spacedBy(6.dp)
+                  ) {
+                      Text(
+                          text = "Host: $hostDisplayName",
+                          style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                          color = MaterialTheme.colorScheme.primary,
+                          maxLines = 1,
+                          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                      )
+                      if (hostPhoneOrEmail.isNotBlank()) {
+                          Text(
+                              text = "• $hostPhoneOrEmail",
+                              style = MaterialTheme.typography.bodySmall,
+                              color = MaterialTheme.colorScheme.onSurfaceVariant,
+                              maxLines = 1,
+                              overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                          )
+                      }
+                  }
+              }
+          } else if (isOwnRoom && isHostUser) {
               Row(
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp)
               ) {
                   Text(
-                      text = "Host: $hostDisplayName",
+                      text = "Host: You",
                       style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                       color = MaterialTheme.colorScheme.primary,
                       maxLines = 1,
                       overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
                   )
-                  if (hostPhoneOrEmail.isNotBlank()) {
-                      Text(
-                          text = "• $hostPhoneOrEmail",
-                          style = MaterialTheme.typography.bodySmall,
-                          color = MaterialTheme.colorScheme.onSurfaceVariant,
-                          maxLines = 1,
-                          overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                      )
-                  }
               }
           }
 
@@ -1521,15 +1541,17 @@ fun CustomProfileCard(
           }
         }
         
-        Row {
-          if (onEdit != null) {
-            IconButton(onClick = onEdit) {
-              Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
+        if (isOwnRoom && !isAdmin) {
+          Row {
+            if (onEdit != null) {
+              IconButton(onClick = onEdit) {
+                Icon(imageVector = Icons.Default.Edit, contentDescription = "Edit", tint = MaterialTheme.colorScheme.primary)
+              }
             }
-          }
-          if (onDelete != null) {
-            IconButton(onClick = onDelete) {
-              Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = AlertRed)
+            if (onDelete != null) {
+              IconButton(onClick = onDelete) {
+                Icon(imageVector = Icons.Default.Delete, contentDescription = "Delete", tint = AlertRed)
+              }
             }
           }
         }
@@ -1732,50 +1754,7 @@ fun CustomProfileCard(
           Spacer(modifier = Modifier.height(12.dp))
       }
 
-      if (isOwnRoom) {
-          Row(
-              modifier = Modifier.fillMaxWidth().height(48.dp),
-              horizontalArrangement = Arrangement.spacedBy(12.dp)
-          ) {
-              if (onViewCandidatesClick != null) {
-                  androidx.compose.material3.OutlinedButton(
-                      onClick = onViewCandidatesClick,
-                      modifier = Modifier.weight(1f).fillMaxHeight(),
-                      shape = RoundedCornerShape(8.dp),
-                      contentPadding = PaddingValues(0.dp)
-                  ) {
-                      Icon(Icons.Default.Visibility, contentDescription = "View", modifier = Modifier.size(18.dp))
-                      Spacer(modifier = Modifier.width(6.dp))
-                      Text("View", style = MaterialTheme.typography.labelMedium)
-                  }
-              }
-              if (onSendCredentialsClick != null) {
-                  Button(
-                      onClick = onSendCredentialsClick,
-                      modifier = Modifier.weight(1f).fillMaxHeight(),
-                      shape = RoundedCornerShape(8.dp),
-                      contentPadding = PaddingValues(0.dp),
-                      colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
-                  ) {
-                      Icon(Icons.Default.Send, contentDescription = "Send", modifier = Modifier.size(18.dp))
-                      Spacer(modifier = Modifier.width(6.dp))
-                      Text("Send", style = MaterialTheme.typography.labelMedium)
-                  }
-              }
-              if (onSubmit != null) {
-                  androidx.compose.material3.OutlinedButton(
-                      onClick = onSubmit,
-                      modifier = Modifier.weight(1f).fillMaxHeight(),
-                      shape = RoundedCornerShape(8.dp),
-                      contentPadding = PaddingValues(0.dp)
-                  ) {
-                      Icon(Icons.Default.CheckCircle, contentDescription = "Submit", modifier = Modifier.size(18.dp))
-                      Spacer(modifier = Modifier.width(6.dp))
-                      Text("Submit", style = MaterialTheme.typography.labelMedium)
-                  }
-              }
-          }
-      } else if (isAdmin) {
+      if (isAdmin) {
           Row(
               modifier = Modifier
                   .fillMaxWidth()
@@ -1898,6 +1877,49 @@ fun CustomProfileCard(
                           maxLines = 1,
                           overflow = TextOverflow.Ellipsis
                       )
+                  }
+              }
+          }
+      } else if (isOwnRoom) {
+          Row(
+              modifier = Modifier.fillMaxWidth().height(48.dp),
+              horizontalArrangement = Arrangement.spacedBy(12.dp)
+          ) {
+              if (onViewCandidatesClick != null) {
+                  androidx.compose.material3.OutlinedButton(
+                      onClick = onViewCandidatesClick,
+                      modifier = Modifier.weight(1f).fillMaxHeight(),
+                      shape = RoundedCornerShape(8.dp),
+                      contentPadding = PaddingValues(0.dp)
+                  ) {
+                      Icon(Icons.Default.Visibility, contentDescription = "View", modifier = Modifier.size(18.dp))
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text("View", style = MaterialTheme.typography.labelMedium)
+                  }
+              }
+              if (onSendCredentialsClick != null) {
+                  Button(
+                      onClick = onSendCredentialsClick,
+                      modifier = Modifier.weight(1f).fillMaxHeight(),
+                      shape = RoundedCornerShape(8.dp),
+                      contentPadding = PaddingValues(0.dp),
+                      colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
+                  ) {
+                      Icon(Icons.Default.Send, contentDescription = "Send", modifier = Modifier.size(18.dp))
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text("Send", style = MaterialTheme.typography.labelMedium)
+                  }
+              }
+              if (onSubmit != null) {
+                  androidx.compose.material3.OutlinedButton(
+                      onClick = onSubmit,
+                      modifier = Modifier.weight(1f).fillMaxHeight(),
+                      shape = RoundedCornerShape(8.dp),
+                      contentPadding = PaddingValues(0.dp)
+                  ) {
+                      Icon(Icons.Default.CheckCircle, contentDescription = "Submit", modifier = Modifier.size(18.dp))
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text("Submit", style = MaterialTheme.typography.labelMedium)
                   }
               }
           }

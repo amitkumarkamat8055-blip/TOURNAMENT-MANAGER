@@ -105,11 +105,15 @@ class TournamentRepository(
     val localId = matchDao.insertMatch(entity)
 
     try {
+      val matchCategory = if (match.name.contains("Weekly", ignoreCase = true)) "Weekly" else "Daily"
       val matchMap = hashMapOf<String, Any>(
         "id" to localId,
         "matchNumber" to match.matchNumber,
         "name" to match.name,
         "gameTitle" to match.gameTitle,
+        "category" to matchCategory,
+        "createdByAdmin" to true,
+        "adminUid" to com.example.ui.viewmodel.AdminConfig.ADMIN_UID,
         "entryFee" to match.entryFee,
         "prizePool" to match.prizePool,
         "perKill" to match.perKill,
@@ -344,16 +348,28 @@ class TournamentRepository(
   private val auth = FirebaseAuth.getInstance()
   private val firestore = FirebaseFirestore.getInstance()
 
+  private fun isValidEmailFormat(email: String): Boolean {
+    val trimmed = email.trim()
+    if (trimmed.isBlank() || trimmed.contains(" ") || !trimmed.contains("@")) return false
+    val parts = trimmed.split("@")
+    if (parts.size != 2 || parts[0].isBlank() || parts[1].isBlank()) return false
+    val domain = parts[1]
+    return domain.contains(".") && domain.substringAfterLast(".").length >= 2
+  }
+
   private fun getEmailForAuth(input: String): String {
-    val isEmail = input.contains("@") && input.contains(".")
-    val digitsOnly = input.filter { it.isDigit() }
-    val isPhone = !isEmail && digitsOnly.length >= 7
-    return if (isEmail) {
-      input.trim().lowercase()
-    } else if (isPhone) {
-      "${digitsOnly}@tourneymatch.com"
-    } else {
-      input.trim()
+    val trimmed = input.trim()
+    val isEmail = isValidEmailFormat(trimmed)
+    val digitsOnly = trimmed.filter { it.isDigit() }
+    return when {
+      isEmail -> trimmed.lowercase()
+      digitsOnly.length >= 7 -> "${digitsOnly.takeLast(10)}@tourneymatch.com"
+      digitsOnly.isNotEmpty() -> "${digitsOnly}@tourneymatch.com"
+      else -> {
+        val sanitized = trimmed.filter { it.isLetterOrDigit() || it == '_' }.lowercase()
+        if (sanitized.isNotBlank()) "${sanitized}@tourneymatch.com"
+        else "player_${System.currentTimeMillis()}@tourneymatch.com"
+      }
     }
   }
 
@@ -513,6 +529,43 @@ class TournamentRepository(
     }
   }
 
+  suspend fun ensureFirebaseAuth(): String {
+    val auth = FirebaseAuth.getInstance()
+    if (auth.currentUser != null) {
+      return auth.currentUser!!.uid
+    }
+    try {
+      val session = activeSessionDao.getActiveSession()
+      val account = session?.let { userAccountDao.findById(it.activeAccountId) }
+      if (account != null && account.password.isNotBlank()) {
+        val authEmail = if (account.email.isNotBlank() && isValidEmailFormat(account.email) && !account.email.endsWith("@tourneymatch.com", ignoreCase = true)) {
+          account.email.trim().lowercase()
+        } else if (account.phone.isNotBlank()) {
+          val digits = account.phone.filter { it.isDigit() }
+          if (digits.isNotBlank()) "${digits.takeLast(10)}@tourneymatch.com" else getEmailForAuth(account.username)
+        } else {
+          getEmailForAuth(account.username)
+        }
+        try {
+          val res = auth.signInWithEmailAndPassword(authEmail, account.password).await()
+          if (res.user != null) return res.user!!.uid
+        } catch (_: Exception) {
+          try {
+            val res = auth.createUserWithEmailAndPassword(authEmail, account.password).await()
+            if (res.user != null) return res.user!!.uid
+          } catch (_: Exception) {}
+        }
+      }
+    } catch (_: Exception) {}
+
+    try {
+      val res = auth.signInAnonymously().await()
+      if (res.user != null) return res.user!!.uid
+    } catch (_: Exception) {}
+
+    return auth.currentUser?.uid ?: ""
+  }
+
   suspend fun login(identifier: String, password: String): Result<UserAccount> {
     val trimmedId = identifier.trim()
     val trimmedPass = password.trim()
@@ -526,10 +579,11 @@ class TournamentRepository(
           userAccountDao.findByPhone(digitsOnly) ?: userAccountDao.findByPhone(digitsOnly.takeLast(10))
       } else null
 
-    val authEmail = if (localAccount != null && localAccount.email.isNotBlank() && localAccount.email.contains("@") && !localAccount.email.endsWith("@tourneymatch.com", ignoreCase = true)) {
+    val authEmail = if (localAccount != null && localAccount.email.isNotBlank() && isValidEmailFormat(localAccount.email) && !localAccount.email.endsWith("@tourneymatch.com", ignoreCase = true)) {
       localAccount.email.trim().lowercase()
     } else if (localAccount != null && localAccount.phone.isNotBlank()) {
-      "${localAccount.phone.filter { it.isDigit() }}@tourneymatch.com"
+      val digits = localAccount.phone.filter { it.isDigit() }
+      if (digits.isNotBlank()) "${digits.takeLast(10)}@tourneymatch.com" else getEmailForAuth(trimmedId)
     } else {
       getEmailForAuth(trimmedId)
     }
@@ -578,7 +632,17 @@ class TournamentRepository(
       syncProfileWithAccount(localAccount)
       syncMatchJoinedForAccount(localAccount)
       if (auth.currentUser == null) {
-        try { auth.signInAnonymously().await() } catch (_: Exception) {}
+        try {
+          val authRes = auth.signInWithEmailAndPassword(authEmail, trimmedPass).await()
+          if (authRes.user != null) syncSessionForFirebaseUser(authRes.user!!.uid)
+        } catch (_: Exception) {
+          try {
+            val authRes = auth.createUserWithEmailAndPassword(authEmail, trimmedPass).await()
+            if (authRes.user != null) syncSessionForFirebaseUser(authRes.user!!.uid)
+          } catch (_: Exception) {
+            try { auth.signInAnonymously().await() } catch (_: Exception) {}
+          }
+        }
       }
       return Result.success(localAccount.toDomain())
     }
@@ -615,7 +679,30 @@ class TournamentRepository(
 
     // 3. User does not exist in local database, attempt login via Firebase Auth
     return try {
-      val authResult = auth.signInWithEmailAndPassword(authEmail, trimmedPass).await()
+      var candidateEmail = authEmail
+      val authResult = try {
+        auth.signInWithEmailAndPassword(candidateEmail, trimmedPass).await()
+      } catch (firstEx: Exception) {
+        var resolvedResult: com.google.firebase.auth.AuthResult? = null
+        if (digitsOnly.length >= 7) {
+          try {
+            val phoneQuery = firestore.collection("users")
+              .whereIn("phoneNumber", listOf(digitsOnly, digitsOnly.takeLast(10)))
+              .limit(1)
+              .get()
+              .await()
+            if (!phoneQuery.isEmpty) {
+              val doc = phoneQuery.documents[0]
+              val realEmail = doc.getString("email")?.takeIf { isValidEmailFormat(it) }
+              if (realEmail != null && realEmail != candidateEmail) {
+                candidateEmail = realEmail
+                resolvedResult = auth.signInWithEmailAndPassword(realEmail, trimmedPass).await()
+              }
+            }
+          } catch (_: Exception) {}
+        }
+        resolvedResult ?: throw firstEx
+      }
       val user = authResult.user ?: throw Exception("User not found")
       
       // Fetch from Firestore
@@ -674,7 +761,11 @@ class TournamentRepository(
         }
         is FirebaseAuthInvalidCredentialsException -> {
           Log.w("AuthError", "Login failed: incorrect credentials - ${e.message}")
-          Result.failure(IllegalArgumentException("Incorrect password. Please try again."))
+          if (e.message?.contains("badly formatted", ignoreCase = true) == true) {
+            Result.failure(IllegalArgumentException("Please enter a valid email address or 10-digit mobile number."))
+          } else {
+            Result.failure(IllegalArgumentException("Incorrect password. Please try again."))
+          }
         }
         is FirebaseTooManyRequestsException -> {
           Log.e("AuthError", "login: FirebaseTooManyRequestsException", e)
@@ -686,11 +777,19 @@ class TournamentRepository(
         }
         is FirebaseAuthException -> {
           Log.e("AuthError", "login: FirebaseAuthException ${e.errorCode}", e)
-          Result.failure(IllegalArgumentException(e.localizedMessage ?: "Login failed (${e.errorCode})"))
+          if (e.message?.contains("badly formatted", ignoreCase = true) == true) {
+            Result.failure(IllegalArgumentException("Please enter a valid email address or 10-digit mobile number."))
+          } else {
+            Result.failure(IllegalArgumentException(e.localizedMessage ?: "Login failed (${e.errorCode})"))
+          }
         }
         else -> {
           Log.e("AuthError", "login: Exception", e)
-          Result.failure(IllegalArgumentException(e.message ?: "Login failed. Please check your credentials."))
+          if (e.message?.contains("badly formatted", ignoreCase = true) == true) {
+            Result.failure(IllegalArgumentException("Please enter a valid email address or 10-digit mobile number."))
+          } else {
+            Result.failure(IllegalArgumentException(e.message ?: "Login failed. Please check your credentials."))
+          }
         }
       }
     }
@@ -712,15 +811,22 @@ class TournamentRepository(
     val trimmedPassword = password.trim()
     val trimmedName = name.trim()
     
-    val finalEmail = if (rawEmail.isNotBlank()) rawEmail else if (rawInput.contains("@")) rawInput else ""
-    val finalPhone = if (rawPhone.isNotBlank()) rawPhone.filter { it.isDigit() } else if (!rawInput.contains("@")) rawInput.filter { it.isDigit() } else ""
+    val isRawEmail = isValidEmailFormat(rawInput)
+    val finalEmail = if (isValidEmailFormat(rawEmail)) rawEmail else if (isRawEmail) rawInput else ""
+    val finalPhone = if (rawPhone.isNotBlank()) rawPhone.filter { it.isDigit() } else if (!isRawEmail) rawInput.filter { it.isDigit() } else ""
 
     if (finalEmail.isBlank() && finalPhone.isBlank()) {
-      return Result.failure(IllegalArgumentException("Email or Phone Number is required"))
+      return Result.failure(IllegalArgumentException("Please enter a valid Email Address or Mobile Number"))
     }
     if (trimmedPassword.length < 6) return Result.failure(IllegalArgumentException("Password must be at least 6 characters long"))
     
-    val authEmail = if (finalEmail.isNotBlank()) finalEmail.lowercase() else "${finalPhone}@tourneymatch.com"
+    val authEmail = if (finalEmail.isNotBlank()) {
+      finalEmail.lowercase()
+    } else {
+      val digits = finalPhone.filter { it.isDigit() }
+      if (digits.isNotBlank()) "${digits.takeLast(10)}@tourneymatch.com"
+      else "player_${System.currentTimeMillis()}@tourneymatch.com"
+    }
     val isEmail = finalEmail.isNotBlank()
     val phoneVal = finalPhone
     
@@ -1174,10 +1280,11 @@ class TournamentRepository(
     imageUriStr: String
   ): CustomProfile {
     var imageUrl = ""
+    val folderName = if (category.equals("BR", ignoreCase = true)) "br_room_profiles" else "custom_profiles"
     if (imageUriStr.isNotEmpty()) {
         try {
             val uri = Uri.parse(imageUriStr)
-            val storageRef = FirebaseStorage.getInstance().reference.child("custom_profiles/${UUID.randomUUID()}.jpg")
+            val storageRef = FirebaseStorage.getInstance().reference.child("$folderName/${UUID.randomUUID()}.jpg")
             storageRef.putFile(uri).await()
             imageUrl = storageRef.downloadUrl.await().toString()
         } catch (e: Exception) {
@@ -1185,16 +1292,8 @@ class TournamentRepository(
         }
     }
     
-    var currentFirebaseUser = FirebaseAuth.getInstance().currentUser
-    if (currentFirebaseUser == null) {
-        try {
-            FirebaseAuth.getInstance().signInAnonymously().await()
-            currentFirebaseUser = FirebaseAuth.getInstance().currentUser
-        } catch (authEx: Exception) {
-            Log.w("TournamentRepo", "Anonymous auth before save custom profile: ${authEx.message}")
-        }
-    }
-    val finalUid = currentFirebaseUser?.uid?.takeIf { it.isNotBlank() } ?: uid.takeIf { it.isNotBlank() } ?: "host_${System.currentTimeMillis()}"
+    val authUid = ensureFirebaseAuth()
+    val finalUid = authUid.takeIf { it.isNotBlank() } ?: uid.takeIf { it.isNotBlank() } ?: "host_${System.currentTimeMillis()}"
     
     val activeSession = activeSessionDao.getActiveSession()
     val curAccount = activeSession?.let { userAccountDao.findById(it.activeAccountId) }
@@ -1204,7 +1303,8 @@ class TournamentRepository(
     val hostEmail = curAccount?.email?.takeIf { it.isNotBlank() && !it.endsWith("@tourneymatch.com", ignoreCase = true) } ?: ""
     val hostGameUid = uid.ifBlank { curAccount?.gameUid ?: curProfile?.uid ?: "" }
 
-    val docRef = FirebaseFirestore.getInstance().collection("custom_profiles").document()
+    val collectionName = if (category.equals("BR", ignoreCase = true)) "br_room_profiles" else "custom_profiles"
+    val docRef = FirebaseFirestore.getInstance().collection(collectionName).document()
     val generatedId = docRef.id
 
     val profileMap = hashMapOf(
@@ -1324,10 +1424,11 @@ class TournamentRepository(
     existingImageUrl: String
   ) {
     var imageUrl = existingImageUrl
+    val folderName = if (category.equals("BR", ignoreCase = true)) "br_room_profiles" else "custom_profiles"
     if (imageUriStr.isNotEmpty() && !imageUriStr.startsWith("http")) {
         try {
             val uri = Uri.parse(imageUriStr)
-            val storageRef = FirebaseStorage.getInstance().reference.child("custom_profiles/${UUID.randomUUID()}.jpg")
+            val storageRef = FirebaseStorage.getInstance().reference.child("$folderName/${UUID.randomUUID()}.jpg")
             storageRef.putFile(uri).await()
             imageUrl = storageRef.downloadUrl.await().toString()
         } catch (e: Exception) {
@@ -1359,10 +1460,15 @@ class TournamentRepository(
         } catch (_: Exception) {}
     }
     
+    val targetCollection = if (category.equals("BR", ignoreCase = true)) "br_room_profiles" else "custom_profiles"
+    val altCollection = if (category.equals("BR", ignoreCase = true)) "custom_profiles" else "br_room_profiles"
     try {
-        FirebaseFirestore.getInstance().collection("custom_profiles").document(profileId).update(profileMap as Map<String, Any>).await()
+        FirebaseFirestore.getInstance().collection(targetCollection).document(profileId).set(profileMap as Map<String, Any>, com.google.firebase.firestore.SetOptions.merge()).await()
         try {
             FirebaseFirestore.getInstance().collection("custom_matches").document(profileId).set(profileMap as Map<String, Any>, com.google.firebase.firestore.SetOptions.merge()).await()
+        } catch (_: Exception) {}
+        try {
+            FirebaseFirestore.getInstance().collection(altCollection).document(profileId).delete()
         } catch (_: Exception) {}
     } catch (e: Exception) {
         Log.e("FirestoreError", "Failed to update custom profile", e)

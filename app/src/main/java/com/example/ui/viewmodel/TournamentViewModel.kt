@@ -88,19 +88,23 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
           (doc.get("matchId") as? Long) ?: (doc.get("matchId") as? String)?.toLongOrNull() ?: doc.id.toLongOrNull()
         }?.toSet() ?: emptySet()
 
-        if (database.matchDao().getMatchCount() == 0) {
-          val matchDocs = try {
-            FirebaseFirestore.getInstance().collection("matches").get().await()
-          } catch (ex: Exception) { null }
-
-          val hasCloudMatches = (matchDocs != null && !matchDocs.isEmpty)
-          val hasDeletedMatches = deletedIds.isNotEmpty()
-
-          if (!hasCloudMatches && !hasDeletedMatches) {
-            AppDatabase.populateInitialData(database, includeMatches = true)
-          } else {
-            AppDatabase.populateInitialData(database, includeMatches = false)
+        val sampleDummyMatchNames = setOf(
+          "daily free fire bermuda battle",
+          "free fire clash squad arena",
+          "weekly free fire lone wolf masters",
+          "sunday free fire purgatory solo",
+          "weekly free fire kalahari pro league"
+        )
+        val existingLocal = database.matchDao().getAllMatchesOnce()
+        existingLocal.forEach { match ->
+          if (sampleDummyMatchNames.any { match.name.lowercase().contains(it) }) {
+            database.matchDao().deleteMatch(match.id)
+            database.matchRegistrationDao().deleteRegistrationsForMatch(match.id)
           }
+        }
+
+        if (database.matchDao().getMatchCount() == 0) {
+          AppDatabase.populateInitialData(database, includeMatches = false)
         } else {
           if (deletedIds.isNotEmpty()) {
             deletedIds.forEach { delId ->
@@ -190,91 +194,73 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
                   (doc.get("matchId") as? Long) ?: (doc.get("matchId") as? String)?.toLongOrNull() ?: doc.id.toLongOrNull()
                 }?.toSet() ?: emptySet()
 
-                if (snapshot.documents.isEmpty()) {
-                  // Only seed to Firestore if both matches AND deleted_matches are completely empty
-                  if (deletedIds.isEmpty()) {
-                    val currentLocal = database.matchDao().getMatchCount()
-                    if (currentLocal > 0) {
-                      val localMatches: List<MatchEntity> = database.matchDao().getAllMatchesOnce()
-                      localMatches.forEach { entity: MatchEntity ->
-                        val map = hashMapOf<String, Any>(
-                          "id" to entity.id,
-                          "matchNumber" to entity.matchNumber,
-                          "name" to entity.name,
-                          "gameTitle" to entity.gameTitle,
-                          "entryFee" to entity.entryFee,
-                          "prizePool" to entity.prizePool,
-                          "perKill" to entity.perKill,
-                          "totalPlayers" to entity.totalPlayers,
-                          "maxPlayers" to entity.maxPlayers,
-                          "date" to entity.date,
-                          "time" to entity.time,
-                          "rankRequirement" to entity.rankRequirement,
-                          "region" to entity.region,
-                          "status" to entity.status,
-                          "format" to entity.format,
-                          "mapName" to entity.mapName,
-                          "rules" to entity.rules,
-                          "description" to entity.description,
-                          "prizeDistributionJson" to entity.prizeDistributionJson,
-                          "roomId" to entity.roomId,
-                          "roomPassword" to entity.roomPassword,
-                          "bannerImageUrl" to entity.bannerImageUrl,
-                          "isRoomBroadcasted" to entity.isRoomBroadcasted,
-                          "createdAt" to System.currentTimeMillis()
-                        )
-                        FirebaseFirestore.getInstance().collection("matches").document(entity.id.toString()).set(map)
-                      }
-                    }
-                  }
-                } else {
-                  val remoteMatchEntities = snapshot.documents.mapNotNull { doc ->
-                    val data = doc.data ?: return@mapNotNull null
-                    val id = (data["id"] as? Long) ?: (data["id"] as? String)?.toLongOrNull() ?: doc.id.toLongOrNull() ?: return@mapNotNull null
-                    if (deletedIds.contains(id)) return@mapNotNull null
+                val sampleDummyNames = setOf(
+                  "daily free fire bermuda battle",
+                  "free fire clash squad arena",
+                  "weekly free fire lone wolf masters",
+                  "sunday free fire purgatory solo",
+                  "weekly free fire kalahari pro league"
+                )
 
-                    val existingEntity = database.matchDao().getMatchById(id)
-                    MatchEntity(
-                      id = id,
-                      matchNumber = (data["matchNumber"] as? Long)?.toInt() ?: (data["matchNumber"] as? Int) ?: id.toInt(),
-                      name = data["name"] as? String ?: "Tournament Match",
-                      gameTitle = data["gameTitle"] as? String ?: "Free Fire MAX",
-                      entryFee = (data["entryFee"] as? Long)?.toInt() ?: (data["entryFee"] as? Int) ?: 0,
-                      prizePool = (data["prizePool"] as? Long)?.toInt() ?: (data["prizePool"] as? Int) ?: 0,
-                      perKill = (data["perKill"] as? Long)?.toInt() ?: (data["perKill"] as? Int) ?: 0,
-                      totalPlayers = (data["totalPlayers"] as? Long)?.toInt() ?: (data["totalPlayers"] as? Int) ?: 0,
-                      maxPlayers = (data["maxPlayers"] as? Long)?.toInt() ?: (data["maxPlayers"] as? Int) ?: 100,
-                      date = data["date"] as? String ?: "Today",
-                      time = data["time"] as? String ?: "07:00 PM IST",
-                      rankRequirement = data["rankRequirement"] as? String ?: "Level 20+",
-                      region = data["region"] as? String ?: "India",
-                      status = data["status"] as? String ?: "OPEN",
-                      format = data["format"] as? String ?: "Squad (BR)",
-                      mapName = data["mapName"] as? String ?: "Bermuda (Classic)",
-                      rules = data["rules"] as? String ?: "",
-                      description = data["description"] as? String ?: "",
-                      prizeDistributionJson = data["prizeDistributionJson"] as? String ?: "[]",
-                      roomId = data["roomId"] as? String ?: "",
-                      roomPassword = data["roomPassword"] as? String ?: "",
-                      isJoined = existingEntity?.isJoined ?: false,
-                      userGameUid = existingEntity?.userGameUid ?: "",
-                      bannerImageUrl = data["bannerImageUrl"] as? String ?: "",
-                      isRoomBroadcasted = (data["isRoomBroadcasted"] as? Boolean) ?: false
-                    )
+                // Purge any dummy sample matches that might exist in Firestore
+                val validRemoteDocs = snapshot.documents.filter { doc ->
+                  val data = doc.data ?: return@filter false
+                  val id = (data["id"] as? Long) ?: (data["id"] as? String)?.toLongOrNull() ?: doc.id.toLongOrNull() ?: return@filter false
+                  if (deletedIds.contains(id)) return@filter false
+                  val name = (data["name"] as? String ?: "").lowercase()
+                  val createdByAdmin = (data["createdByAdmin"] as? Boolean) ?: false
+                  if (!createdByAdmin && sampleDummyNames.any { name.contains(it) }) {
+                    try { doc.reference.delete() } catch (_: Exception) {}
+                    return@filter false
                   }
+                  true
+                }
 
-                  val remoteIds = remoteMatchEntities.map { it.id }.toSet()
-                  val localMatches: List<MatchEntity> = database.matchDao().getAllMatchesOnce()
-                  localMatches.forEach { local: MatchEntity ->
-                    if (deletedIds.contains(local.id) || !remoteIds.contains(local.id)) {
-                      database.matchDao().deleteMatch(local.id)
-                      database.matchRegistrationDao().deleteRegistrationsForMatch(local.id)
-                    }
-                  }
+                val remoteMatchEntities = validRemoteDocs.mapNotNull { doc ->
+                  val data = doc.data ?: return@mapNotNull null
+                  val id = (data["id"] as? Long) ?: (data["id"] as? String)?.toLongOrNull() ?: doc.id.toLongOrNull() ?: return@mapNotNull null
 
-                  remoteMatchEntities.forEach { remote ->
-                    database.matchDao().insertMatch(remote)
+                  val existingEntity = database.matchDao().getMatchById(id)
+                  MatchEntity(
+                    id = id,
+                    matchNumber = (data["matchNumber"] as? Long)?.toInt() ?: (data["matchNumber"] as? Int) ?: id.toInt(),
+                    name = data["name"] as? String ?: "Tournament Match",
+                    gameTitle = data["gameTitle"] as? String ?: "Free Fire MAX",
+                    entryFee = (data["entryFee"] as? Long)?.toInt() ?: (data["entryFee"] as? Int) ?: 0,
+                    prizePool = (data["prizePool"] as? Long)?.toInt() ?: (data["prizePool"] as? Int) ?: 0,
+                    perKill = (data["perKill"] as? Long)?.toInt() ?: (data["perKill"] as? Int) ?: 0,
+                    totalPlayers = (data["totalPlayers"] as? Long)?.toInt() ?: (data["totalPlayers"] as? Int) ?: 0,
+                    maxPlayers = (data["maxPlayers"] as? Long)?.toInt() ?: (data["maxPlayers"] as? Int) ?: 100,
+                    date = data["date"] as? String ?: "Today",
+                    time = data["time"] as? String ?: "07:00 PM IST",
+                    rankRequirement = data["rankRequirement"] as? String ?: "Level 20+",
+                    region = data["region"] as? String ?: "India",
+                    status = data["status"] as? String ?: "OPEN",
+                    format = data["format"] as? String ?: "Squad (BR)",
+                    mapName = data["mapName"] as? String ?: "Bermuda (Classic)",
+                    rules = data["rules"] as? String ?: "",
+                    description = data["description"] as? String ?: "",
+                    prizeDistributionJson = data["prizeDistributionJson"] as? String ?: "[]",
+                    roomId = data["roomId"] as? String ?: existingEntity?.roomId ?: "",
+                    roomPassword = data["roomPassword"] as? String ?: existingEntity?.roomPassword ?: "",
+                    isJoined = existingEntity?.isJoined ?: false,
+                    userGameUid = existingEntity?.userGameUid ?: "",
+                    bannerImageUrl = data["bannerImageUrl"] as? String ?: "",
+                    isRoomBroadcasted = (data["isRoomBroadcasted"] as? Boolean) ?: false
+                  )
+                }
+
+                val remoteIds = remoteMatchEntities.map { it.id }.toSet()
+                val localMatches: List<MatchEntity> = database.matchDao().getAllMatchesOnce()
+                localMatches.forEach { local: MatchEntity ->
+                  if (deletedIds.contains(local.id) || !remoteIds.contains(local.id)) {
+                    database.matchDao().deleteMatch(local.id)
+                    database.matchRegistrationDao().deleteRegistrationsForMatch(local.id)
                   }
+                }
+
+                if (remoteMatchEntities.isNotEmpty()) {
+                  database.matchDao().insertMatches(remoteMatchEntities)
                 }
               } catch (ex: Exception) {
                 android.util.Log.e("TournamentViewModel", "Error syncing matches from Firestore", ex)
@@ -364,8 +350,10 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
 
   fun deleteCustomProfile(profileId: String) {
     _firestoreCustomProfiles.value = _firestoreCustomProfiles.value.filter { it.id != profileId }
-    FirebaseFirestore.getInstance().collection("custom_profiles").document(profileId).delete()
-    try { FirebaseFirestore.getInstance().collection("custom_matches").document(profileId).delete() } catch (_: Exception) {}
+    val db = FirebaseFirestore.getInstance()
+    db.collection("custom_profiles").document(profileId).delete()
+    db.collection("br_room_profiles").document(profileId).delete()
+    try { db.collection("custom_matches").document(profileId).delete() } catch (_: Exception) {}
     val savedRooms = (customProfilePrefs.getStringSet("applied_room_ids", emptySet()) ?: emptySet()).toMutableSet()
     savedRooms.remove(profileId)
     customProfilePrefs.edit().putStringSet("applied_room_ids", savedRooms).apply()
@@ -390,9 +378,16 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
         savedRooms.remove(profileId)
         customProfilePrefs.edit().putStringSet("applied_room_ids", savedRooms).apply()
 
-        val profileRef = db.collection("custom_profiles").document(profileId)
+        val profileRefCustom = db.collection("custom_profiles").document(profileId)
+        val profileRefBr = db.collection("br_room_profiles").document(profileId)
         db.runTransaction { transaction ->
-          val profileDoc = transaction.get(profileRef)
+          val docCustom = transaction.get(profileRefCustom)
+          val (profileRef, profileDoc) = if (docCustom.exists()) {
+            profileRefCustom to docCustom
+          } else {
+            profileRefBr to transaction.get(profileRefBr)
+          }
+
           if (profileDoc.exists()) {
             val currentCandidates = profileDoc.getLong("candidateCount")?.toInt() ?: 0
             val newCandidates = (currentCandidates - 1).coerceAtLeast(0)
@@ -496,15 +491,17 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
       try {
         val db = FirebaseFirestore.getInstance()
         val snapProfiles = try { db.collection("custom_profiles").get().await() } catch (_: Exception) { null }
+        val snapBrProfiles = try { db.collection("br_room_profiles").get().await() } catch (_: Exception) { null }
         val snapMatches = try { db.collection("custom_matches").get().await() } catch (_: Exception) { null }
 
-        val allDocs = (snapProfiles?.documents ?: emptyList()) + (snapMatches?.documents ?: emptyList())
+        val allDocs = (snapProfiles?.documents ?: emptyList()) + (snapBrProfiles?.documents ?: emptyList()) + (snapMatches?.documents ?: emptyList())
         val realProfiles = allDocs
           .mapNotNull { doc -> mapFirestoreDocToCustomProfile(doc) }
           .distinctBy { it.id }
-          .sortedByDescending { it.createdAt }
 
-        _firestoreCustomProfiles.value = realProfiles
+        val previousProfiles = _firestoreCustomProfiles.value
+        val mergedProfiles = (realProfiles + previousProfiles).distinctBy { it.id }.sortedByDescending { it.createdAt }
+        _firestoreCustomProfiles.value = mergedProfiles
         recomputeApplications(_allCustomProfileApplicationsForAdmin.value)
       } catch (_: Exception) {}
     }
@@ -523,18 +520,21 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
         val fakeIds = listOf("room_ff_1v1_headshot", "room_cs_4v4_war", "room_br_solo_bermuda", "room_br_squad_kalahari")
         for (fId in fakeIds) {
           try { db.collection("custom_profiles").document(fId).delete() } catch (_: Exception) {}
+          try { db.collection("br_room_profiles").document(fId).delete() } catch (_: Exception) {}
           try { db.collection("custom_matches").document(fId).delete() } catch (_: Exception) {}
         }
         val snapProfiles = try { db.collection("custom_profiles").get().await() } catch (_: Exception) { null }
+        val snapBrProfiles = try { db.collection("br_room_profiles").get().await() } catch (_: Exception) { null }
         val snapMatches = try { db.collection("custom_matches").get().await() } catch (_: Exception) { null }
 
-        val allDocs = (snapProfiles?.documents ?: emptyList()) + (snapMatches?.documents ?: emptyList())
+        val allDocs = (snapProfiles?.documents ?: emptyList()) + (snapBrProfiles?.documents ?: emptyList()) + (snapMatches?.documents ?: emptyList())
         val realProfiles = allDocs
           .mapNotNull { doc -> mapFirestoreDocToCustomProfile(doc) }
           .distinctBy { it.id }
-          .sortedByDescending { it.createdAt }
 
-        _firestoreCustomProfiles.value = realProfiles
+        val previousProfiles = _firestoreCustomProfiles.value
+        val mergedProfiles = (realProfiles + previousProfiles).distinctBy { it.id }.sortedByDescending { it.createdAt }
+        _firestoreCustomProfiles.value = mergedProfiles
         recomputeApplications(_allCustomProfileApplicationsForAdmin.value)
       } catch (ex: Exception) {
         android.util.Log.w("TournamentViewModel", "Error initial get custom_profiles: ${ex.message}")
@@ -543,6 +543,11 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
 
     val db = FirebaseFirestore.getInstance()
     db.collection("custom_profiles").addSnapshotListener { snapshot, e ->
+      if (snapshot != null) {
+        syncCustomProfilesFromSnapshots()
+      }
+    }
+    db.collection("br_room_profiles").addSnapshotListener { snapshot, e ->
       if (snapshot != null) {
         syncCustomProfilesFromSnapshots()
       }
@@ -572,7 +577,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
             profileName = data["profileName"] as? String ?: "",
             hostUid = data["hostUid"] as? String ?: "",
             candidateName = data["candidateName"] as? String ?: "",
-            phone = data["phone"] as? String ?: "",
+            phone = (data["phone"] as? String)?.takeIf { !it.contains("@") } ?: (data["phoneNumber"] as? String ?: ""),
+            email = (data["email"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["phone"] as? String ?: "").contains("@")) data["phone"] as String else ""),
             uid = data["uid"] as? String ?: "",
             level = data["level"]?.toString() ?: "",
             rank = data["rank"] as? String ?: "",
@@ -628,7 +634,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
                 profileName = data["profileName"] as? String ?: "",
                 hostUid = data["hostUid"] as? String ?: "",
                 candidateName = data["candidateName"] as? String ?: "",
-                phone = data["phone"] as? String ?: "",
+                phone = (data["phone"] as? String)?.takeIf { !it.contains("@") } ?: (data["phoneNumber"] as? String ?: ""),
+                email = (data["email"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["phone"] as? String ?: "").contains("@")) data["phone"] as String else ""),
                 uid = data["uid"] as? String ?: "",
                 level = data["level"]?.toString() ?: "",
                 rank = data["rank"] as? String ?: "",
@@ -1591,11 +1598,18 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     viewModelScope.launch {
       val db = FirebaseFirestore.getInstance()
       val appRef = db.collection("custom_profile_applications").document(applicationId)
-      val profileRef = db.collection("custom_profiles").document(profileId)
+      val profileRefCustom = db.collection("custom_profiles").document(profileId)
+      val profileRefBr = db.collection("br_room_profiles").document(profileId)
 
       try {
         db.runTransaction { transaction ->
-          val profileDoc = transaction.get(profileRef)
+          val docCustom = transaction.get(profileRefCustom)
+          val (profileRef, profileDoc) = if (docCustom.exists()) {
+            profileRefCustom to docCustom
+          } else {
+            profileRefBr to transaction.get(profileRefBr)
+          }
+
           transaction.update(appRef, "status", status)
 
           if (profileDoc.exists()) {
@@ -1706,7 +1720,10 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
       val effectiveUid = uid.ifBlank { curAccount?.gameUid ?: curUserProfile.uid }
       val effectiveApplicantUid = currentUserUid.ifBlank { effectiveUid }
       val db = FirebaseFirestore.getInstance()
-      val profileRef = db.collection("custom_profiles").document(profile.id)
+      val targetColl = if (profile.category.equals("BR", ignoreCase = true)) "br_room_profiles" else "custom_profiles"
+      val altColl = if (profile.category.equals("BR", ignoreCase = true)) "custom_profiles" else "br_room_profiles"
+      val profileRefTarget = db.collection(targetColl).document(profile.id)
+      val profileRefAlt = db.collection(altColl).document(profile.id)
       val newAppRef = db.collection("custom_profile_applications").document()
 
       // Save locally to preferences immediately so joined status is never lost
@@ -1735,7 +1752,12 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
 
         try {
           db.runTransaction { transaction ->
-            val snapshot = transaction.get(profileRef)
+            val targetSnap = transaction.get(profileRefTarget)
+            val (profileRef, snapshot) = if (targetSnap.exists()) {
+              profileRefTarget to targetSnap
+            } else {
+              profileRefAlt to transaction.get(profileRefAlt)
+            }
             if (!snapshot.exists()) {
               throw FirebaseFirestoreException("Match room does not exist.", FirebaseFirestoreException.Code.NOT_FOUND)
             }
@@ -1772,6 +1794,9 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
             val hostPhone = snapshot.getString("hostPhone")?.takeIf { it.isNotBlank() } ?: profile.hostPhone
             val hostEmail = snapshot.getString("hostEmail")?.takeIf { it.isNotBlank() } ?: profile.hostEmail
 
+            val candidateEmail = curAccount?.email?.takeIf { it.isNotBlank() } ?: (if (effectivePhone.contains("@")) effectivePhone else "")
+            val candidatePhone = if (!effectivePhone.contains("@")) effectivePhone else curAccount?.phone ?: ""
+
             val application = hashMapOf(
               "profileId" to profile.id,
               "profileName" to (snapshot.getString("name") ?: profile.name),
@@ -1782,7 +1807,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
               "hostEmail" to hostEmail,
               "applicantUid" to effectiveApplicantUid,
               "candidateName" to effectiveCandidateName,
-              "phone" to effectivePhone,
+              "phone" to candidatePhone,
+              "email" to candidateEmail,
               "uid" to effectiveUid,
               "level" to level,
               "rank" to rank,
@@ -1805,6 +1831,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
           }
           // Direct fallback write
           val fallbackHostUid = profile.hostUid.takeIf { it.isNotBlank() } ?: profile.uid
+          val candidateEmail = curAccount?.email?.takeIf { it.isNotBlank() } ?: (if (effectivePhone.contains("@")) effectivePhone else "")
+          val candidatePhone = if (!effectivePhone.contains("@")) effectivePhone else curAccount?.phone ?: ""
           val application = hashMapOf(
             "profileId" to profile.id,
             "profileName" to profile.name,
@@ -1815,7 +1843,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
             "hostEmail" to profile.hostEmail,
             "applicantUid" to effectiveApplicantUid,
             "candidateName" to effectiveCandidateName,
-            "phone" to effectivePhone,
+            "phone" to candidatePhone,
+            "email" to candidateEmail,
             "uid" to effectiveUid,
             "level" to level,
             "rank" to rank,
@@ -1825,15 +1854,28 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
           )
           newAppRef.set(application).await()
           try {
-            profileRef.update(
+            profileRefTarget.update(
               mapOf(
                 "candidateCount" to com.google.firebase.firestore.FieldValue.increment(1),
                 "joinedPlayers" to com.google.firebase.firestore.FieldValue.increment(1),
                 "isLocked" to (existingAppsCount + 1 >= 7)
               )
             ).await()
-          } catch (_: Exception) {}
+          } catch (_: Exception) {
+            try {
+              profileRefAlt.update(
+                mapOf(
+                  "candidateCount" to com.google.firebase.firestore.FieldValue.increment(1),
+                  "joinedPlayers" to com.google.firebase.firestore.FieldValue.increment(1),
+                  "isLocked" to (existingAppsCount + 1 >= 7)
+                )
+              ).await()
+            } catch (_: Exception) {}
+          }
         }
+
+        val candEmail = curAccount?.email?.takeIf { it.isNotBlank() } ?: (if (effectivePhone.contains("@")) effectivePhone else "")
+        val candPhone = if (!effectivePhone.contains("@")) effectivePhone else curAccount?.phone ?: ""
 
         // Optimistic update
         val optimisticApp = com.example.data.model.CustomProfileApplication(
@@ -1846,7 +1888,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
           hostEmail = profile.hostEmail,
           hostGameUid = profile.hostGameUid.ifBlank { profile.uid },
           candidateName = effectiveCandidateName,
-          phone = effectivePhone,
+          phone = candPhone,
+          email = candEmail,
           uid = effectiveUid,
           level = level,
           rank = rank,

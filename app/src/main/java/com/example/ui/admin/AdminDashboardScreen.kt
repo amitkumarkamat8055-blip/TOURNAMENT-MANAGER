@@ -1326,6 +1326,7 @@ fun AdminUserCard(userMap: Map<String, Any>) {
 @Composable
 fun CreateOrEditMatchDialog(
     existingMatch: MatchItem?,
+    defaultCategory: String = "Daily",
     onDismiss: () -> Unit,
     onSave: (
         name: String,
@@ -1345,14 +1346,35 @@ fun CreateOrEditMatchDialog(
 ) {
     val isEdit = existingMatch != null
 
-    var category by remember { mutableStateOf(if (existingMatch?.name?.contains("Weekly", ignoreCase = true) == true) "Weekly" else "Daily") }
+    val todayDate = remember {
+        val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
+        dateFormat.format(java.util.Calendar.getInstance().time)
+    }
+    val dateOptions = remember(todayDate) {
+        listOf(todayDate)
+    }
+    val timeOptions = remember {
+        listOf("10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM")
+    }
+
+    var dateExpanded by remember { mutableStateOf(false) }
+    var timeExpanded by remember { mutableStateOf(false) }
+
+    var category by remember { mutableStateOf(if (existingMatch?.name?.contains("Weekly", ignoreCase = true) == true) "Weekly" else if (existingMatch != null) "Daily" else defaultCategory) }
     var matchName by remember { mutableStateOf(existingMatch?.name?.replace("Daily ", "")?.replace("Weekly ", "") ?: "Clash Squad Blitz") }
     var gameTitle by remember { mutableStateOf(existingMatch?.gameTitle ?: "Free Fire MAX") }
     var entryFeeStr by remember { mutableStateOf(existingMatch?.entryFee?.toString() ?: "30") }
     var prizePoolStr by remember { mutableStateOf(existingMatch?.prizePool?.toString() ?: "1000") }
     var perKillStr by remember { mutableStateOf(existingMatch?.perKill?.takeIf { it > 0 }?.toString() ?: "15") }
     var maxPlayersStr by remember { mutableStateOf(existingMatch?.maxPlayers?.toString() ?: "48") }
-    var dateStr by remember { mutableStateOf(existingMatch?.date ?: "Today") }
+    var dateStr by remember {
+        mutableStateOf(
+            if (existingMatch?.date?.isNotBlank() == true) {
+                if (existingMatch.date.equals("Today", ignoreCase = true)) todayDate
+                else existingMatch.date
+            } else todayDate
+        )
+    }
     var timeStr by remember { mutableStateOf(existingMatch?.time ?: "08:00 PM") }
     var formatStr by remember {
         mutableStateOf(
@@ -1401,13 +1423,23 @@ fun CreateOrEditMatchDialog(
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 Text("Match Type", style = MaterialTheme.typography.labelMedium)
-                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
                     listOf("Daily", "Weekly").forEach { cat ->
-                        FilterChip(
-                            selected = category == cat,
+                        val isSelected = category == cat
+                        Button(
                             onClick = { category = cat },
-                            label = { Text("$cat Match") }
-                        )
+                            modifier = Modifier.weight(1f),
+                            colors = ButtonDefaults.buttonColors(
+                                containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                            ),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("$cat Match")
+                        }
                     }
                 }
 
@@ -1531,23 +1563,24 @@ fun CreateOrEditMatchDialog(
                         horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
                         listOf("Solo", "Duo", "Squad").forEach { opt ->
-                            FilterChip(
-                                selected = formatStr.equals(opt, ignoreCase = true),
+                            val isSelected = formatStr.equals(opt, ignoreCase = true)
+                            Button(
                                 onClick = { formatStr = opt },
-                                label = {
-                                    Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = opt,
-                                            fontWeight = if (formatStr.equals(opt, ignoreCase = true)) FontWeight.Bold else FontWeight.Normal,
-                                            fontSize = 13.sp,
-                                            maxLines = 1
-                                        )
-                                    }
-                                },
                                 modifier = Modifier
                                     .weight(1f)
-                                    .testTag("admin_format_$opt")
-                            )
+                                    .testTag("admin_format_$opt"),
+                                colors = ButtonDefaults.buttonColors(
+                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
+                                    contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
+                                ),
+                                shape = RoundedCornerShape(8.dp)
+                            ) {
+                                Text(
+                                    text = opt,
+                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }
@@ -1561,57 +1594,76 @@ fun CreateOrEditMatchDialog(
                     modifier = Modifier.fillMaxWidth().testTag("admin_max_players_input")
                 )
 
-                // Match Day & Time Selection (Today & Tomorrow with Time)
-                Column(
+                // Match Schedule: Date & Time Dropdowns (identical to Create Custom Profile form)
+                @OptIn(ExperimentalMaterial3Api::class)
+                Row(
                     modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Text(
-                        text = "Match Schedule",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold
-                    )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    // Date Dropdown (showing only first day's date)
+                    ExposedDropdownMenuBox(
+                        expanded = dateExpanded,
+                        onExpandedChange = { dateExpanded = !dateExpanded },
+                        modifier = Modifier.weight(1f)
                     ) {
-                        // Two options for Day: Today & Tomorrow
-                        Row(
-                            modifier = Modifier.weight(1.1f),
-                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        OutlinedTextField(
+                            value = dateStr,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("DATE") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = dateExpanded) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .menuAnchor()
+                                .testTag("admin_date_select")
+                        )
+                        ExposedDropdownMenu(
+                            expanded = dateExpanded,
+                            onDismissRequest = { dateExpanded = false }
                         ) {
-                            listOf("Today", "Tomorrow").forEach { dayOpt ->
-                                FilterChip(
-                                    selected = dateStr.equals(dayOpt, ignoreCase = true),
-                                    onClick = { dateStr = dayOpt },
-                                    label = {
-                                        Box(modifier = Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) {
-                                            Text(
-                                                text = dayOpt,
-                                                fontWeight = if (dateStr.equals(dayOpt, ignoreCase = true)) FontWeight.Bold else FontWeight.Normal,
-                                                fontSize = 12.sp,
-                                                maxLines = 1
-                                            )
-                                        }
-                                    },
-                                    modifier = Modifier
-                                        .weight(1f)
-                                        .testTag("admin_day_$dayOpt")
+                            dateOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        dateStr = option
+                                        dateExpanded = false
+                                    }
                                 )
                             }
                         }
+                    }
 
-                        // Time Input
+                    // Match Time Dropdown
+                    ExposedDropdownMenuBox(
+                        expanded = timeExpanded,
+                        onExpandedChange = { timeExpanded = !timeExpanded },
+                        modifier = Modifier.weight(1f)
+                    ) {
                         OutlinedTextField(
                             value = timeStr,
-                            onValueChange = { timeStr = it },
-                            label = { Text("Time") },
-                            singleLine = true,
+                            onValueChange = {},
+                            readOnly = true,
+                            label = { Text("TIME") },
+                            trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = timeExpanded) },
                             modifier = Modifier
-                                .weight(0.9f)
-                                .testTag("admin_time_input")
+                                .fillMaxWidth()
+                                .menuAnchor()
+                                .testTag("admin_time_select")
                         )
+                        ExposedDropdownMenu(
+                            expanded = timeExpanded,
+                            onDismissRequest = { timeExpanded = false }
+                        ) {
+                            timeOptions.forEach { option ->
+                                DropdownMenuItem(
+                                    text = { Text(option) },
+                                    onClick = {
+                                        timeStr = option
+                                        timeExpanded = false
+                                    }
+                                )
+                            }
+                        }
                     }
                 }
 
