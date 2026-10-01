@@ -103,7 +103,7 @@ data class UserAccountEntity(
 data class ActiveSessionEntity(
   @PrimaryKey val id: Int = 1,
   val activeAccountId: Long,
-  val isLoggedIn: Boolean = true,
+  val isLoggedIn: Boolean = false,
   val isGuest: Boolean = false,
   val lastLoginTime: Long = System.currentTimeMillis()
 )

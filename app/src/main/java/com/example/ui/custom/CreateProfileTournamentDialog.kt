@@ -69,9 +69,17 @@ fun CreateProfileTournamentDialog(
   var category by remember { mutableStateOf(if (profileToEdit?.category?.isNotBlank() == true) profileToEdit.category else "Custom") }
   
   val dayOptions = remember {
-      val calendar = java.util.Calendar.getInstance()
       val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
-      listOf(dateFormat.format(calendar.time))
+      (0 until 12).map { offset ->
+          val cal = java.util.Calendar.getInstance()
+          cal.add(java.util.Calendar.DAY_OF_YEAR, offset)
+          val dStr = dateFormat.format(cal.time)
+          when (offset) {
+              0 -> "Today, $dStr"
+              1 -> "Tomorrow, $dStr"
+              else -> dStr
+          }
+      }
   }
   
   var game by remember { mutableStateOf(if (profileToEdit?.game?.isNotBlank() == true) profileToEdit.game else "Lone Wolf") }
@@ -80,13 +88,16 @@ fun CreateProfileTournamentDialog(
           if (profileToEdit?.day?.isNotBlank() == true) {
               val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
               val cal = java.util.Calendar.getInstance()
-              when (profileToEdit.day) {
-                  "Today" -> dateFormat.format(cal.time)
-                  "Tomorrow" -> {
-                      cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
-                      dateFormat.format(cal.time)
-                  }
-                  else -> profileToEdit.day
+              val todayStr = dateFormat.format(cal.time)
+              val calTom = java.util.Calendar.getInstance()
+              calTom.add(java.util.Calendar.DAY_OF_YEAR, 1)
+              val tomStr = dateFormat.format(calTom.time)
+              val trimmed = profileToEdit.day.trim()
+              when {
+                  trimmed.equals("Today", ignoreCase = true) || trimmed.equals(todayStr, ignoreCase = true) -> "Today, $todayStr"
+                  trimmed.equals("Tomorrow", ignoreCase = true) || trimmed.equals(tomStr, ignoreCase = true) -> "Tomorrow, $tomStr"
+                  trimmed.startsWith("Today, ", ignoreCase = true) || trimmed.startsWith("Tomorrow, ", ignoreCase = true) -> trimmed
+                  else -> trimmed
               }
           } else dayOptions.first()
       ) 
@@ -128,7 +139,7 @@ fun CreateProfileTournamentDialog(
   
   val gameOptions = listOf("Lone Wolf", "Custom")
   val timeOptions = listOf("10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM")
-  val typeOptions = if (category == "BR") listOf("Solo", "Duo", "Squad") else listOf("1VS1", "2VS2", "4VS4")
+  val typeOptions = if (category == "BR") listOf("Solo", "Duo") else listOf("1VS1", "2VS2", "4VS4")
   val modeOptions = if (category == "BR") listOf("Esports Mode", "Specific Mode") else listOf("Body", "Headshot")
   val gunOptions = listOf("UMP", "All", "Headshot Gun")
   val specificGunOptions = listOf("Yes", "No")

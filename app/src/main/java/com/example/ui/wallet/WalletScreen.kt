@@ -8,6 +8,7 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -36,6 +37,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -65,7 +67,6 @@ fun WalletScreen(
 
     var showAddFundsDialog by remember { mutableStateOf(false) }
     var showWithdrawDialog by remember { mutableStateOf(false) }
-    var selectedFilter by remember { mutableIntStateOf(0) } // 0 = All, 1 = Credits, 2 = Debits
 
     val context = LocalContext.current
 
@@ -79,13 +80,7 @@ fun WalletScreen(
         Toast.makeText(context, "UPI payment completed", Toast.LENGTH_SHORT).show()
     }
 
-    val filteredTransactions = remember(transactions, selectedFilter) {
-        when (selectedFilter) {
-            1 -> transactions.filter { it.type.equals("CREDIT", ignoreCase = true) }
-            2 -> transactions.filter { it.type.equals("DEBIT", ignoreCase = true) }
-            else -> transactions
-        }
-    }
+    val filteredTransactions = transactions
 
     Scaffold(
         modifier = modifier.fillMaxSize(),
@@ -157,8 +152,11 @@ fun WalletScreen(
                     colors = CardDefaults.cardColors(
                         containerColor = MaterialTheme.colorScheme.surface
                     ),
-                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 3.dp)
+                    border = BorderStroke(
+                        1.dp,
+                        MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
                 ) {
                     Column(
                         modifier = Modifier
@@ -174,154 +172,115 @@ fun WalletScreen(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Box(
                                     modifier = Modifier
-                                        .size(38.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primaryContainer),
+                                        .size(42.dp)
+                                        .clip(RoundedCornerShape(12.dp))
+                                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
                                     contentAlignment = Alignment.Center
                                 ) {
                                     Icon(
                                         imageVector = Icons.Default.AccountBalanceWallet,
                                         contentDescription = "Wallet",
                                         tint = MaterialTheme.colorScheme.primary,
-                                        modifier = Modifier.size(22.dp)
+                                        modifier = Modifier.size(24.dp)
                                     )
                                 }
-                                Spacer(modifier = Modifier.width(10.dp))
+                                Spacer(modifier = Modifier.width(12.dp))
                                 Column {
                                     Text(
-                                        text = "Account Balance",
-                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        text = "Tournament Wallet",
+                                        style = MaterialTheme.typography.titleMedium.copy(
+                                            fontWeight = FontWeight.Bold
+                                        ),
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
                                     Text(
                                         text = "Instant 24x7 UPI Payouts",
-                                        style = MaterialTheme.typography.bodySmall.copy(fontSize = 11.sp),
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
 
-                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                Icon(
-                                    imageVector = Icons.Default.Shield,
-                                    contentDescription = "Secure",
-                                    tint = SuccessGreen,
-                                    modifier = Modifier.size(16.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = "Verified",
-                                    style = MaterialTheme.typography.labelSmall.copy(
-                                        color = SuccessGreen,
-                                        fontWeight = FontWeight.SemiBold
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = SuccessGreen.copy(alpha = 0.15f),
+                                border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.35f))
+                            ) {
+                                Row(
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Shield,
+                                        contentDescription = "Secure",
+                                        tint = SuccessGreen,
+                                        modifier = Modifier.size(14.dp)
                                     )
-                                )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = "Verified",
+                                        style = MaterialTheme.typography.labelSmall.copy(
+                                            color = SuccessGreen,
+                                            fontWeight = FontWeight.SemiBold,
+                                            fontSize = 11.sp
+                                        )
+                                    )
+                                }
                             }
                         }
 
                         Spacer(modifier = Modifier.height(18.dp))
 
-                        // Dual Balance Status Cards: Available Balance & Total Earning
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        // Available Funds Status Card
+                        Surface(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("status_available_balance"),
+                            shape = RoundedCornerShape(16.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
                         ) {
-                            // 1. Available Balance Box
-                            Surface(
+                            Column(
                                 modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("status_available_balance"),
-                                shape = RoundedCornerShape(16.dp),
-                                color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
-                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.2f))
+                                    .fillMaxWidth()
+                                    .padding(16.dp)
                             ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp)
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                 ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.Payments,
-                                            contentDescription = null,
-                                            tint = MaterialTheme.colorScheme.primary,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "Available Balance",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium
-                                            ),
-                                            color = MaterialTheme.colorScheme.onPrimaryContainer
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "₹${userProfile.walletBalance}",
-                                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                        color = MaterialTheme.colorScheme.primary,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
+                                    Icon(
+                                        imageVector = Icons.Default.Payments,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(18.dp)
                                     )
                                     Text(
-                                        text = "Ready to play or withdraw",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
+                                        text = "Available Funds",
+                                        style = MaterialTheme.typography.labelMedium.copy(
+                                            fontWeight = FontWeight.Bold,
+                                            letterSpacing = 0.5.sp
+                                        ),
                                         color = MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
-                            }
-
-                            // 2. Total Earning Status Box
-                            Surface(
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("status_total_earning"),
-                                shape = RoundedCornerShape(16.dp),
-                                color = TrophyGoldContainer.copy(alpha = 0.45f),
-                                border = BorderStroke(1.dp, TrophyGold.copy(alpha = 0.35f))
-                            ) {
-                                Column(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(14.dp)
-                                ) {
-                                    Row(
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.spacedBy(6.dp)
-                                    ) {
-                                        Icon(
-                                            imageVector = Icons.Default.EmojiEvents,
-                                            contentDescription = null,
-                                            tint = TrophyGold,
-                                            modifier = Modifier.size(16.dp)
-                                        )
-                                        Text(
-                                            text = "Total Earning",
-                                            style = MaterialTheme.typography.labelSmall.copy(
-                                                fontSize = 11.sp,
-                                                fontWeight = FontWeight.Medium
-                                            ),
-                                            color = TrophyGold
-                                        )
-                                    }
-                                    Spacer(modifier = Modifier.height(6.dp))
-                                    Text(
-                                        text = "₹${userProfile.totalEarnings}",
-                                        style = MaterialTheme.typography.headlineMedium.copy(fontWeight = FontWeight.ExtraBold),
-                                        color = TrophyGold,
-                                        maxLines = 1,
-                                        overflow = TextOverflow.Ellipsis
-                                    )
-                                    Text(
-                                        text = "Lifetime tournament wins",
-                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                }
+                                Spacer(modifier = Modifier.height(6.dp))
+                                Text(
+                                    text = "₹${userProfile.walletBalance}",
+                                    style = MaterialTheme.typography.headlineLarge.copy(
+                                        fontWeight = FontWeight.ExtraBold,
+                                        fontSize = 32.sp
+                                    ),
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Ready to play matches or instant withdraw",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
                             }
                         }
 
@@ -336,9 +295,9 @@ fun WalletScreen(
                                 onClick = { showAddFundsDialog = true },
                                 modifier = Modifier
                                     .weight(1f)
+                                    .height(44.dp)
                                     .testTag("btn_wallet_add_funds"),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                shape = RoundedCornerShape(12.dp)
                             ) {
                                 Icon(Icons.Default.Add, contentDescription = null, modifier = Modifier.size(18.dp))
                                 Spacer(modifier = Modifier.width(6.dp))
@@ -348,18 +307,19 @@ fun WalletScreen(
                                 )
                             }
 
-                            Button(
+                            OutlinedButton(
                                 onClick = { showWithdrawDialog = true },
                                 modifier = Modifier
                                     .weight(1f)
+                                    .height(44.dp)
                                     .testTag("btn_wallet_withdraw"),
-                                shape = RoundedCornerShape(14.dp),
-                                colors = ButtonDefaults.filledTonalButtonColors(
-                                    containerColor = MaterialTheme.colorScheme.secondaryContainer,
-                                    contentColor = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
+                                shape = RoundedCornerShape(12.dp)
                             ) {
-                                Icon(Icons.Default.AccountBalance, contentDescription = null, modifier = Modifier.size(18.dp))
+                                Icon(
+                                    Icons.Default.AccountBalance,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
                                 Spacer(modifier = Modifier.width(6.dp))
                                 Text(
                                     "Withdraw",
@@ -438,44 +398,6 @@ fun WalletScreen(
                             style = MaterialTheme.typography.labelSmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
-                    }
-
-                    Spacer(modifier = Modifier.height(10.dp))
-
-                    // Filter row: All, Credits, Debits
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        listOf(
-                            "All (${transactions.size})",
-                            "Credits (+)",
-                            "Debits (-)"
-                        ).forEachIndexed { index, label ->
-                            val isSelected = selectedFilter == index
-                            Surface(
-                                shape = RoundedCornerShape(10.dp),
-                                color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
-                                border = if (isSelected) null else BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .clickable { selectedFilter = index }
-                            ) {
-                                Box(
-                                    contentAlignment = Alignment.Center,
-                                    modifier = Modifier.padding(vertical = 7.dp)
-                                ) {
-                                    Text(
-                                        text = label,
-                                        style = MaterialTheme.typography.labelSmall.copy(
-                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
-                                            fontSize = 11.sp,
-                                            color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    )
-                                }
-                            }
-                        }
                     }
                 }
             }

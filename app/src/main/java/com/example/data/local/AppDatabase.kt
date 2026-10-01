@@ -149,18 +149,14 @@ abstract class AppDatabase : RoomDatabase() {
         )
       )
 
-      // Initial active session (Default to Account 1 for candidate/player, or Account 2 ONLY for verified Admin)
-      val currentAuthUid = try {
-        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid ?: ""
-      } catch (_: Exception) { "" }
-      val initialAccountId = if (currentAuthUid == com.example.ui.viewmodel.AdminConfig.ADMIN_UID || com.example.ui.viewmodel.AdminConfig.ADMIN_UIDS.contains(currentAuthUid)) 2L else 1L
+      // Initial active session: Default to logged-out state so fresh installs ask to Log In or Create Account
       sessionDao.setActiveSession(
         ActiveSessionEntity(
           id = 1,
-          activeAccountId = initialAccountId,
-          isLoggedIn = true,
+          activeAccountId = 0L,
+          isLoggedIn = false,
           isGuest = false,
-          lastLoginTime = System.currentTimeMillis()
+          lastLoginTime = 0L
         )
       )
 

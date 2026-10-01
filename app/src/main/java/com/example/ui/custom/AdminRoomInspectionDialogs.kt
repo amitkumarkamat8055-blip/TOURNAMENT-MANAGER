@@ -1016,53 +1016,18 @@ fun AdminResultsAndReportsDialog(
     val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
     var selectedImageForPreview by remember { mutableStateOf<String?>(null) }
     var selectedAppForPayout by remember { mutableStateOf<CustomProfileApplication?>(null) }
-    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Result Photos, 1 = Reports
+    var defaultWinnerUidForPayout by remember { mutableStateOf("") }
+    var selectedAppForRefund by remember { mutableStateOf<CustomProfileApplication?>(null) }
+    var defaultRefundUid by remember { mutableStateOf("") }
+    var defaultRefundAmount by remember { mutableStateOf("") }
+    var defaultRefundReason by remember { mutableStateOf("") }
+    var selectedTab by remember { mutableIntStateOf(0) } // 0 = Host Result, 1 = Candidate Result
 
-    val hostUidToDisplay = profile.uid.ifBlank { profile.hostUid }
-    val resultApps = applications.filter { it.isResultSubmitted || it.resultScreenshot.isNotBlank() }
-    val reportedApps = applications.filter { it.isReported || it.reportReason.isNotBlank() || it.reportDescription.isNotBlank() }
-
-    var hostActualName by remember(profile) { mutableStateOf(profile.hostActualName.ifBlank { profile.name }) }
-    var hostPhoneOrEmail by remember(profile) { mutableStateOf(profile.hostPhone.ifBlank { profile.hostEmail }) }
-    var hostGameUid by remember(profile) { mutableStateOf(profile.hostGameUid.ifBlank { profile.uid }) }
-
-    LaunchedEffect(profile.id, profile.hostUid, profile.uid) {
-        val targetUid = profile.hostUid.ifBlank { profile.uid }
-        if (targetUid.isNotBlank()) {
-            try {
-                val db = FirebaseFirestore.getInstance()
-                val doc = try {
-                    db.collection("users").document(targetUid).get().await()
-                } catch (_: Exception) { null }
-                
-                if (doc != null && doc.exists()) {
-                    val nameFromDoc = doc.getString("fullName") ?: doc.getString("name") ?: ""
-                    val phoneFromDoc = doc.getString("phoneNumber") ?: doc.getString("phone") ?: ""
-                    val emailFromDoc = doc.getString("email")?.takeIf { !it.endsWith("@tourneymatch.com", ignoreCase = true) } ?: ""
-                    val gameUidFromDoc = doc.getString("gameUid") ?: doc.getString("uid") ?: ""
-
-                    if (nameFromDoc.isNotBlank()) hostActualName = nameFromDoc
-                    if (phoneFromDoc.isNotBlank()) hostPhoneOrEmail = phoneFromDoc
-                    else if (emailFromDoc.isNotBlank()) hostPhoneOrEmail = emailFromDoc
-                    if (gameUidFromDoc.isNotBlank()) hostGameUid = gameUidFromDoc
-                } else {
-                    val querySnap = try {
-                        db.collection("users").whereEqualTo("gameUid", profile.uid).limit(1).get().await()
-                    } catch (_: Exception) { null }
-                    if (querySnap != null && !querySnap.isEmpty) {
-                        val uDoc = querySnap.documents[0]
-                        val nameFromDoc = uDoc.getString("fullName") ?: uDoc.getString("name") ?: ""
-                        val phoneFromDoc = uDoc.getString("phoneNumber") ?: uDoc.getString("phone") ?: ""
-                        val emailFromDoc = uDoc.getString("email")?.takeIf { !it.endsWith("@tourneymatch.com", ignoreCase = true) } ?: ""
-                        if (nameFromDoc.isNotBlank()) hostActualName = nameFromDoc
-                        if (phoneFromDoc.isNotBlank()) hostPhoneOrEmail = phoneFromDoc
-                        else if (emailFromDoc.isNotBlank()) hostPhoneOrEmail = emailFromDoc
-                    }
-                }
-            } catch (e: Exception) {
-                Log.w("HostLookup", "Error fetching host details: ${e.message}")
-            }
-        }
+    val hostResultApps = applications.filter {
+        it.isHostResultSubmitted || (it.isResultSubmitted && it.resultSubmittedBy.equals("Host", ignoreCase = true)) || it.hostResultScreenshot.isNotBlank()
+    }
+    val candidateResultApps = applications.filter {
+        it.isCandidateResultSubmitted || (it.isResultSubmitted && !it.resultSubmittedBy.equals("Host", ignoreCase = true)) || it.candidateResultScreenshot.isNotBlank() || it.isReported || it.reportMediaUrl.isNotBlank()
     }
 
     ModalBottomSheet(
@@ -1101,7 +1066,7 @@ fun AdminResultsAndReportsDialog(
                             )
                         }
                         Text(
-                            text = "RESULTS & DISPUTES",
+                            text = "MATCH RESULTS",
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.ExtraBold),
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1,
@@ -1109,7 +1074,7 @@ fun AdminResultsAndReportsDialog(
                         )
                     }
                     Text(
-                        text = "Match result screenshots, video reports & payment settlements",
+                        text = "Verify Host & Candidate match results and settle prize payouts",
                         style = MaterialTheme.typography.bodySmall,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1122,7 +1087,7 @@ fun AdminResultsAndReportsDialog(
 
             Spacer(modifier = Modifier.height(10.dp))
 
-            // Room & Host Summary Card
+            // Room Summary Card (No Host Info)
             Surface(
                 shape = RoundedCornerShape(12.dp),
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
@@ -1138,52 +1103,17 @@ fun AdminResultsAndReportsDialog(
                         modifier = Modifier.weight(1f).padding(end = 8.dp),
                         verticalArrangement = Arrangement.spacedBy(3.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            Text(
-                                text = "Host: $hostActualName",
-                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onSurface,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis
-                            )
-                            if (hostGameUid.isNotBlank()) {
-                                Text(
-                                    text = "(UID: $hostGameUid)",
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                    color = MaterialTheme.colorScheme.primary
-                                )
-                                IconButton(
-                                    onClick = {
-                                        clipboard.setPrimaryClip(ClipData.newPlainText("Host UID", hostGameUid))
-                                        Toast.makeText(context, "Host UID copied!", Toast.LENGTH_SHORT).show()
-                                    },
-                                    modifier = Modifier.size(18.dp)
-                                ) {
-                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy UID", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
-                                }
-                            }
-                        }
-
-                        if (hostPhoneOrEmail.isNotBlank()) {
-                            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                                Icon(
-                                    imageVector = if (hostPhoneOrEmail.contains("@")) Icons.Default.Email else Icons.Default.Phone,
-                                    contentDescription = null,
-                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(13.dp)
-                                )
-                                Text(
-                                    text = hostPhoneOrEmail,
-                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-
+                        Text(
+                            text = profile.name.ifBlank { "Custom Room Match" },
+                            style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
                         Text(
                             text = "${profile.game} • ${profile.type} • Mode: ${profile.mode}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f)
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 
@@ -1204,7 +1134,7 @@ fun AdminResultsAndReportsDialog(
 
             Spacer(modifier = Modifier.height(12.dp))
 
-            // Tab Selector
+            // Tab Selector: Host Result vs Candidate Result
             TabRow(
                 selectedTabIndex = selectedTab,
                 containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -1218,8 +1148,8 @@ fun AdminResultsAndReportsDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Outlined.EmojiEvents, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Text("Result Photos (${resultApps.size})", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.SportsEsports, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("Host Result (${hostResultApps.size})", fontWeight = FontWeight.Bold)
                         }
                     }
                 )
@@ -1231,8 +1161,8 @@ fun AdminResultsAndReportsDialog(
                             verticalAlignment = Alignment.CenterVertically,
                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                         ) {
-                            Icon(Icons.Outlined.Flag, contentDescription = null, modifier = Modifier.size(16.dp))
-                            Text("Dispute Reports (${reportedApps.size})", fontWeight = FontWeight.Bold)
+                            Icon(Icons.Default.Person, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Text("Candidate Result (${candidateResultApps.size})", fontWeight = FontWeight.Bold)
                         }
                     }
                 )
@@ -1242,8 +1172,8 @@ fun AdminResultsAndReportsDialog(
 
             // Content Area
             if (selectedTab == 0) {
-                // Result Photos Tab
-                if (resultApps.isEmpty()) {
+                // 1. Host Result Tab
+                if (hostResultApps.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1255,20 +1185,20 @@ fun AdminResultsAndReportsDialog(
                             modifier = Modifier.padding(24.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Outlined.EmojiEvents,
+                                imageVector = Icons.Default.SportsEsports,
                                 contentDescription = null,
                                 tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                 modifier = Modifier.size(54.dp)
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "No Match Result Photos Submitted Yet",
+                                text = "No Host Results Submitted Yet",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "Once the match concludes, the host and candidate upload their Booyah screenshot proof and declared winner details here for admin verification and prize payout.",
+                                text = "When the room host uploads their match result screenshot and declares the winner, it will appear here for admin review and prize payout.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1280,19 +1210,28 @@ fun AdminResultsAndReportsDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        itemsIndexed(resultApps, key = { _, item -> item.id }) { index, app ->
+                        itemsIndexed(hostResultApps, key = { _, item -> "host_res_${item.id}" }) { index, app ->
                             val payoutAmount = app.payout.toIntOrNull() ?: profile.payout.toIntOrNull() ?: 50
-                            val winnerUid = app.winnerUid.ifBlank { app.uid }
+                            val winnerName = app.hostWinnerName.ifBlank { app.winnerName }.ifBlank { app.candidateName }
+                            val winnerUid = app.hostWinnerUid.ifBlank { app.winnerUid }.ifBlank { app.uid }
+                            val resultPhoto = app.hostResultScreenshot.ifBlank { app.resultScreenshot }
+                            val mediaUrl = app.reportMediaUrl
+                            val isVideo = mediaUrl.contains(".mp4", ignoreCase = true) ||
+                                          mediaUrl.contains(".mov", ignoreCase = true) ||
+                                          mediaUrl.contains(".mkv", ignoreCase = true) ||
+                                          mediaUrl.contains(".webm", ignoreCase = true) ||
+                                          mediaUrl.contains("video", ignoreCase = true)
 
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 color = MaterialTheme.colorScheme.surface,
                                 border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.5f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
+                                    // Item Top Header
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1303,13 +1242,13 @@ fun AdminResultsAndReportsDialog(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.EmojiEvents,
+                                                imageVector = Icons.Default.SportsEsports,
                                                 contentDescription = null,
                                                 tint = TrophyGold,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                             Text(
-                                                text = "Match Result #${index + 1}",
+                                                text = "Host Result #${index + 1}",
                                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                                 color = MaterialTheme.colorScheme.onSurface
                                             )
@@ -1332,58 +1271,99 @@ fun AdminResultsAndReportsDialog(
 
                                     Spacer(modifier = Modifier.height(10.dp))
 
-                                    // Match Host & Candidate Information Card
+                                    // Candidate Information Box
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
                                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
                                         Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                                            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                                                Text(
-                                                    text = "Room Host: $hostActualName (UID: $hostGameUid)",
-                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                                    color = MaterialTheme.colorScheme.onSurface
-                                                )
-                                                if (app.resultSubmittedBy.isNotBlank()) {
-                                                    Surface(shape = RoundedCornerShape(4.dp), color = MaterialTheme.colorScheme.primaryContainer) {
-                                                        Text(
-                                                            text = "By: ${app.resultSubmittedBy}",
-                                                            style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp),
-                                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
-                                                            modifier = Modifier.padding(horizontal = 4.dp, vertical = 1.dp)
-                                                        )
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Candidate: ${app.candidateName}",
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Text(
+                                                        text = "(UID: ${app.uid})",
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    IconButton(
+                                                        onClick = {
+                                                            clipboard.setPrimaryClip(ClipData.newPlainText("Candidate UID", app.uid))
+                                                            Toast.makeText(context, "Candidate UID copied: ${app.uid}", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        modifier = Modifier.size(18.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy UID", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
                                                     }
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.primaryContainer
+                                                ) {
+                                                    Text(
+                                                        text = "SUBMITTED BY HOST",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    )
                                                 }
                                             }
 
-                                            if (hostPhoneOrEmail.isNotBlank()) {
+                                            if (app.phone.isNotBlank() || app.email.isNotBlank()) {
+                                                val candContact = app.phone.ifBlank { app.email }
                                                 Text(
-                                                    text = "Host Contact: $hostPhoneOrEmail",
+                                                    text = "Candidate Contact: $candContact",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
+                                        }
+                                    }
 
-                                            Text(
-                                                text = "Candidate: ${app.candidateName} (UID: ${app.uid})",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
+                                    Spacer(modifier = Modifier.height(10.dp))
 
-                                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+                                    // 1. SEPARATE SECTION: MATCH RESULT INFO & WINNER PROOF
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = SuccessGreen.copy(alpha = 0.06f),
+                                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(18.dp))
+                                                Text(
+                                                    text = "MATCH RESULT INFORMATION",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = SuccessGreen
+                                                )
+                                            }
 
                                             Row(
                                                 verticalAlignment = Alignment.CenterVertically,
                                                 horizontalArrangement = Arrangement.spacedBy(6.dp)
                                             ) {
                                                 Text(
-                                                    text = "Declared Winner:",
+                                                    text = "Declared Winner by Host:",
                                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
                                                     color = MaterialTheme.colorScheme.onSurface
                                                 )
                                                 Text(
-                                                    text = "${app.winnerName.ifBlank { app.candidateName }} (UID: $winnerUid)",
+                                                    text = "$winnerName (UID: $winnerUid)",
                                                     style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.ExtraBold),
                                                     color = SuccessGreen
                                                 )
@@ -1397,47 +1377,133 @@ fun AdminResultsAndReportsDialog(
                                                     Icon(Icons.Default.ContentCopy, contentDescription = "Copy Winner UID", modifier = Modifier.size(12.dp), tint = SuccessGreen)
                                                 }
                                             }
+
+                                            // Host Result Screenshot Photo
+                                            if (resultPhoto.isNotBlank()) {
+                                                Text(
+                                                    text = "📸 Match Result Screenshot Photo (Click to zoom):",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(190.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                        .clickable { selectedImageForPreview = resultPhoto }
+                                                ) {
+                                                    AsyncImage(
+                                                        model = resultPhoto,
+                                                        contentDescription = "Host Match Result Screenshot",
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
+                                                    )
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = Color.Black.copy(alpha = 0.7f),
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(6.dp)
+                                                    ) {
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                                            Text("Tap to Zoom", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                                        }
+                                                    }
+                                                }
+                                            }
                                         }
                                     }
 
-                                    Spacer(modifier = Modifier.height(10.dp))
-
-                                    // Match Result Screenshot Photo
-                                    if (app.resultScreenshot.isNotBlank()) {
-                                        Text(
-                                            text = "Match Result Photo (Click to zoom):",
-                                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .fillMaxWidth()
-                                                .height(200.dp)
-                                                .clip(RoundedCornerShape(10.dp))
-                                                .background(MaterialTheme.colorScheme.surfaceVariant)
-                                                .clickable { selectedImageForPreview = app.resultScreenshot }
+                                    // 2. SEPARATE SECTION: DISPUTE / REPORT INFO (if present)
+                                    if (app.isReported || app.reportReason.isNotBlank() || app.reportDescription.isNotBlank() || mediaUrl.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = AlertRed.copy(alpha = 0.08f),
+                                            border = BorderStroke(1.dp, AlertRed.copy(alpha = 0.5f)),
+                                            modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            AsyncImage(
-                                                model = app.resultScreenshot,
-                                                contentDescription = "Match Result Screenshot",
-                                                contentScale = ContentScale.Crop,
-                                                modifier = Modifier.fillMaxSize()
-                                            )
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = Color.Black.copy(alpha = 0.7f),
-                                                modifier = Modifier
-                                                    .align(Alignment.BottomEnd)
-                                                    .padding(8.dp)
-                                            ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                                                 Row(
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
                                                     verticalAlignment = Alignment.CenterVertically,
-                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
-                                                    Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-                                                    Text("Tap to Zoom", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                                    Icon(Icons.Default.Warning, contentDescription = null, tint = AlertRed, modifier = Modifier.size(18.dp))
+                                                    Text(
+                                                        text = "DISPUTE & REPORT DETAILS",
+                                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                        color = AlertRed
+                                                    )
+                                                }
+
+                                                if (app.reportReason.isNotBlank()) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = AlertRed.copy(alpha = 0.15f),
+                                                        modifier = Modifier.fillMaxWidth()
+                                                    ) {
+                                                        Text(
+                                                            text = "Reason: ${app.reportReason}",
+                                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                            color = AlertRed,
+                                                            modifier = Modifier.padding(6.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                if (app.reportDescription.isNotBlank()) {
+                                                    Text(
+                                                        text = "Description: ${app.reportDescription}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+
+                                                if (mediaUrl.isNotBlank() && mediaUrl != resultPhoto) {
+                                                    if (isVideo) {
+                                                        Surface(
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            color = Color.Black.copy(alpha = 0.85f),
+                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clickable { openMediaInSystem(context, mediaUrl, true) }
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(10.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                            ) {
+                                                                Icon(Icons.Default.PlayCircle, contentDescription = "Play Video", tint = Color.White, modifier = Modifier.size(32.dp))
+                                                                Column {
+                                                                    Text("🎬 Watch Evidence Video Proof", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold), color = Color.White)
+                                                                    Text("(Tap to open and play video)", style = MaterialTheme.typography.labelSmall, color = Color.Gray)
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(160.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                                .clickable { selectedImageForPreview = mediaUrl }
+                                                        ) {
+                                                            AsyncImage(
+                                                                model = mediaUrl,
+                                                                contentDescription = "Report Photo Proof",
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                        }
+                                                    }
                                                 }
                                             }
                                         }
@@ -1445,7 +1511,14 @@ fun AdminResultsAndReportsDialog(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    // Payout Management Section (Admin Only)
+                                    // 3. SEPARATE SECTION: ADMIN SETTLEMENT & REFUND ACTIONS
+                                    Text(
+                                        text = "Admin Payout & Settle Decision:",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
+
                                     if (app.winningAmountSent) {
                                         Surface(
                                             shape = RoundedCornerShape(8.dp),
@@ -1467,45 +1540,36 @@ fun AdminResultsAndReportsDialog(
                                         }
                                     } else {
                                         Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // Pay Prize Fully Option
                                             Button(
-                                                onClick = { selectedAppForPayout = app },
+                                                onClick = {
+                                                    defaultWinnerUidForPayout = winnerUid
+                                                    selectedAppForPayout = app
+                                                },
                                                 modifier = Modifier.fillMaxWidth(),
                                                 shape = RoundedCornerShape(10.dp),
                                                 colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
                                             ) {
                                                 Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(18.dp))
                                                 Spacer(modifier = Modifier.width(6.dp))
-                                                Text("Send Prize Money (₹$payoutAmount) to Winner")
+                                                Text("Pay Prize Fully (₹$payoutAmount) to Winner", fontWeight = FontWeight.Bold)
                                             }
 
-                                            // Direct Payout Actions (Admin can pay winner, host, or refund candidate)
-                                            Row(
+                                            // Refund Option
+                                            Button(
+                                                onClick = {
+                                                    defaultRefundUid = app.uid
+                                                    defaultRefundAmount = payoutAmount.toString()
+                                                    defaultRefundReason = "Host Result Dispute / Refund"
+                                                    selectedAppForRefund = app
+                                                },
                                                 modifier = Modifier.fillMaxWidth(),
-                                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
                                             ) {
-                                                if (onRefundOrCredit != null) {
-                                                    OutlinedButton(
-                                                        onClick = {
-                                                            onRefundOrCredit(hostUidToDisplay, payoutAmount, "Host Payout for Custom Room")
-                                                        },
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        modifier = Modifier.weight(1f),
-                                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                                                    ) {
-                                                        Text("Pay Host (₹$payoutAmount)", style = MaterialTheme.typography.labelSmall)
-                                                    }
-
-                                                    OutlinedButton(
-                                                        onClick = {
-                                                            onRefundOrCredit(app.uid, payoutAmount, "Candidate Refund / Prize")
-                                                        },
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        modifier = Modifier.weight(1f),
-                                                        contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                                                    ) {
-                                                        Text("Refund Cand. (₹$payoutAmount)", style = MaterialTheme.typography.labelSmall)
-                                                    }
-                                                }
+                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Refund Entry Fee (₹$payoutAmount)", fontWeight = FontWeight.Bold)
                                             }
                                         }
                                     }
@@ -1515,8 +1579,8 @@ fun AdminResultsAndReportsDialog(
                     }
                 }
             } else {
-                // Reports Tab (Photos & Videos)
-                if (reportedApps.isEmpty()) {
+                // 2. Candidate Result Tab
+                if (candidateResultApps.isEmpty()) {
                     Box(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -1528,20 +1592,20 @@ fun AdminResultsAndReportsDialog(
                             modifier = Modifier.padding(24.dp)
                         ) {
                             Icon(
-                                imageVector = Icons.Default.CheckCircle,
+                                imageVector = Icons.Default.Person,
                                 contentDescription = null,
-                                tint = SuccessGreen.copy(alpha = 0.6f),
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f),
                                 modifier = Modifier.size(54.dp)
                             )
                             Spacer(modifier = Modifier.height(12.dp))
                             Text(
-                                text = "No Dispute Reports Filed",
+                                text = "No Candidate Results Submitted Yet",
                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                                 color = MaterialTheme.colorScheme.onSurface
                             )
                             Spacer(modifier = Modifier.height(6.dp))
                             Text(
-                                text = "No dispute reports or rule violations with photo/video proof have been submitted by the candidate or hoster for this room.",
+                                text = "When candidates upload their match result screenshot proof or report details, they will be listed here for admin review and prize payout.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = androidx.compose.ui.text.style.TextAlign.Center
@@ -1553,10 +1617,13 @@ fun AdminResultsAndReportsDialog(
                         modifier = Modifier
                             .fillMaxWidth()
                             .weight(1f),
-                        verticalArrangement = Arrangement.spacedBy(14.dp)
+                        verticalArrangement = Arrangement.spacedBy(16.dp)
                     ) {
-                        itemsIndexed(reportedApps, key = { _, item -> item.id }) { index, app ->
+                        itemsIndexed(candidateResultApps, key = { _, item -> "cand_res_${item.id}" }) { index, app ->
                             val payoutAmount = app.payout.toIntOrNull() ?: profile.payout.toIntOrNull() ?: 50
+                            val winnerName = app.candidateWinnerName.ifBlank { app.winnerName }.ifBlank { app.candidateName }
+                            val winnerUid = app.candidateWinnerUid.ifBlank { app.winnerUid }.ifBlank { app.uid }
+                            val resultPhoto = app.candidateResultScreenshot.ifBlank { app.resultScreenshot }
                             val mediaUrl = app.reportMediaUrl
                             val isVideo = mediaUrl.contains(".mp4", ignoreCase = true) ||
                                           mediaUrl.contains(".mov", ignoreCase = true) ||
@@ -1565,12 +1632,13 @@ fun AdminResultsAndReportsDialog(
                                           mediaUrl.contains("video", ignoreCase = true)
 
                             Surface(
-                                shape = RoundedCornerShape(14.dp),
+                                shape = RoundedCornerShape(16.dp),
                                 color = MaterialTheme.colorScheme.surface,
-                                border = BorderStroke(1.dp, AlertRed.copy(alpha = 0.5f)),
+                                border = BorderStroke(1.5.dp, if (app.isReported) AlertRed.copy(alpha = 0.7f) else SuccessGreen.copy(alpha = 0.5f)),
                                 modifier = Modifier.fillMaxWidth()
                             ) {
                                 Column(modifier = Modifier.padding(14.dp)) {
+                                    // Item Top Header
                                     Row(
                                         modifier = Modifier.fillMaxWidth(),
                                         horizontalArrangement = Arrangement.SpaceBetween,
@@ -1581,27 +1649,27 @@ fun AdminResultsAndReportsDialog(
                                             horizontalArrangement = Arrangement.spacedBy(6.dp)
                                         ) {
                                             Icon(
-                                                imageVector = Icons.Default.Warning,
+                                                imageVector = if (app.isReported) Icons.Default.Warning else Icons.Default.Person,
                                                 contentDescription = null,
-                                                tint = AlertRed,
+                                                tint = if (app.isReported) AlertRed else TrophyGold,
                                                 modifier = Modifier.size(20.dp)
                                             )
                                             Text(
-                                                text = "Dispute Report #${index + 1}",
+                                                text = if (app.isReported) "Candidate Result & Report #${index + 1}" else "Candidate Result #${index + 1}",
                                                 style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                                color = AlertRed
+                                                color = MaterialTheme.colorScheme.onSurface
                                             )
                                         }
 
                                         Surface(
                                             shape = RoundedCornerShape(6.dp),
-                                            color = AlertRed.copy(alpha = 0.18f)
+                                            color = if (app.winningAmountSent) SuccessGreen.copy(alpha = 0.2f) else if (app.isReported) AlertRed.copy(alpha = 0.2f) else TrophyGold.copy(alpha = 0.2f)
                                         ) {
                                             Text(
-                                                text = if (app.reportSubmittedBy.isNotBlank()) "BY: ${app.reportSubmittedBy.uppercase()}" else "REPORTED",
+                                                text = if (app.winningAmountSent) "PRIZE PAID" else if (app.isReported) "REPORT FILED" else "AWAITING PAYOUT",
                                                 style = MaterialTheme.typography.labelSmall.copy(
                                                     fontWeight = FontWeight.Bold,
-                                                    color = AlertRed
+                                                    color = if (app.winningAmountSent) SuccessGreen else if (app.isReported) AlertRed else TrophyGold
                                                 ),
                                                 modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                                             )
@@ -1610,169 +1678,278 @@ fun AdminResultsAndReportsDialog(
 
                                     Spacer(modifier = Modifier.height(10.dp))
 
-                                    // Match Host & Candidate Info
+                                    // Candidate Information Box
                                     Surface(
                                         shape = RoundedCornerShape(8.dp),
-                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
                                         modifier = Modifier.fillMaxWidth()
                                     ) {
-                                        Column(modifier = Modifier.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                                            Text(
-                                                text = "Host: $hostActualName (UID: $hostGameUid)",
-                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            if (hostPhoneOrEmail.isNotBlank()) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.SpaceBetween,
+                                                modifier = Modifier.fillMaxWidth()
+                                            ) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                ) {
+                                                    Text(
+                                                        text = "Candidate: ${app.candidateName}",
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    Text(
+                                                        text = "(UID: ${app.uid})",
+                                                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                                                        color = MaterialTheme.colorScheme.primary
+                                                    )
+                                                    IconButton(
+                                                        onClick = {
+                                                            clipboard.setPrimaryClip(ClipData.newPlainText("Candidate UID", app.uid))
+                                                            Toast.makeText(context, "Candidate UID copied: ${app.uid}", Toast.LENGTH_SHORT).show()
+                                                        },
+                                                        modifier = Modifier.size(18.dp)
+                                                    ) {
+                                                        Icon(Icons.Default.ContentCopy, contentDescription = "Copy UID", modifier = Modifier.size(12.dp), tint = MaterialTheme.colorScheme.primary)
+                                                    }
+                                                }
+                                                Surface(
+                                                    shape = RoundedCornerShape(4.dp),
+                                                    color = MaterialTheme.colorScheme.secondaryContainer
+                                                ) {
+                                                    Text(
+                                                        text = "BY CANDIDATE",
+                                                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                                        color = MaterialTheme.colorScheme.onSecondaryContainer,
+                                                        modifier = Modifier.padding(horizontal = 5.dp, vertical = 2.dp)
+                                                    )
+                                                }
+                                            }
+
+                                            if (app.phone.isNotBlank() || app.email.isNotBlank()) {
+                                                val candContact = app.phone.ifBlank { app.email }
                                                 Text(
-                                                    text = "Host Contact: $hostPhoneOrEmail",
+                                                    text = "Candidate Contact: $candContact",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
                                             }
-                                            Text(
-                                                text = "Candidate: ${app.candidateName} (UID: ${app.uid})",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                            if (app.phone.isNotBlank()) {
+                                        }
+                                    }
+
+                                    Spacer(modifier = Modifier.height(10.dp))
+
+                                    // 1. SEPARATE SECTION: MATCH RESULT INFO & RESULT PHOTO
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = SuccessGreen.copy(alpha = 0.06f),
+                                        border = BorderStroke(1.dp, SuccessGreen.copy(alpha = 0.35f)),
+                                        modifier = Modifier.fillMaxWidth()
+                                    ) {
+                                        Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(18.dp))
                                                 Text(
-                                                    text = "Candidate Phone: ${app.phone}",
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.primary
+                                                    text = "MATCH RESULT INFORMATION",
+                                                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                    color = SuccessGreen
                                                 )
                                             }
-                                        }
-                                    }
 
-                                    if (app.reportReason.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Surface(
-                                            shape = RoundedCornerShape(8.dp),
-                                            color = AlertRed.copy(alpha = 0.1f),
-                                            modifier = Modifier.fillMaxWidth()
-                                        ) {
-                                            Text(
-                                                text = "Reason: ${app.reportReason}",
-                                                style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
-                                                color = AlertRed,
-                                                modifier = Modifier.padding(8.dp)
-                                            )
-                                        }
-                                    }
-
-                                    if (app.reportDescription.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(6.dp))
-                                        Text(
-                                            text = "Description: ${app.reportDescription}",
-                                            style = MaterialTheme.typography.bodySmall,
-                                            color = MaterialTheme.colorScheme.onSurface
-                                        )
-                                    }
-
-                                    // Evidence Media: Photo & Video Support
-                                    if (mediaUrl.isNotBlank()) {
-                                        Spacer(modifier = Modifier.height(10.dp))
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.SpaceBetween,
-                                            verticalAlignment = Alignment.CenterVertically
-                                        ) {
-                                            Text(
-                                                text = if (isVideo) "Evidence Video Proof:" else "Evidence Photo Screenshot:",
-                                                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.SemiBold),
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Surface(
-                                                shape = RoundedCornerShape(4.dp),
-                                                color = if (isVideo) MaterialTheme.colorScheme.primaryContainer else TrophyGold.copy(alpha = 0.2f)
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
                                             ) {
                                                 Text(
-                                                    text = if (isVideo) "VIDEO" else "IMAGE",
-                                                    style = MaterialTheme.typography.labelSmall.copy(
-                                                        fontWeight = FontWeight.Bold,
-                                                        color = if (isVideo) MaterialTheme.colorScheme.onPrimaryContainer else TrophyGold,
-                                                        fontSize = 10.sp
-                                                    ),
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                                    text = "Declared Winner by Candidate:",
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = MaterialTheme.colorScheme.onSurface
                                                 )
-                                            }
-                                        }
-
-                                        Spacer(modifier = Modifier.height(6.dp))
-
-                                        if (isVideo) {
-                                            // Video Evidence Card with Watch Action
-                                            Surface(
-                                                shape = RoundedCornerShape(10.dp),
-                                                color = Color.Black.copy(alpha = 0.85f),
-                                                border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .clickable { openMediaInSystem(context, mediaUrl, true) }
-                                            ) {
-                                                Column(
-                                                    modifier = Modifier.padding(16.dp),
-                                                    horizontalAlignment = Alignment.CenterHorizontally
+                                                Text(
+                                                    text = "$winnerName (UID: $winnerUid)",
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.ExtraBold),
+                                                    color = SuccessGreen
+                                                )
+                                                IconButton(
+                                                    onClick = {
+                                                        clipboard.setPrimaryClip(ClipData.newPlainText("Winner UID", winnerUid))
+                                                        Toast.makeText(context, "Winner UID copied: $winnerUid", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    modifier = Modifier.size(18.dp)
                                                 ) {
-                                                    Icon(
-                                                        imageVector = Icons.Default.PlayCircle,
-                                                        contentDescription = "Play Video",
-                                                        tint = Color.White,
-                                                        modifier = Modifier.size(48.dp)
+                                                    Icon(Icons.Default.ContentCopy, contentDescription = "Copy Winner UID", modifier = Modifier.size(12.dp), tint = SuccessGreen)
+                                                }
+                                            }
+
+                                            // Candidate Match Result Screenshot Photo
+                                            if (resultPhoto.isNotBlank()) {
+                                                Text(
+                                                    text = "📸 Match Result Screenshot Photo (Click to zoom):",
+                                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Box(
+                                                    modifier = Modifier
+                                                        .fillMaxWidth()
+                                                        .height(190.dp)
+                                                        .clip(RoundedCornerShape(8.dp))
+                                                        .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                        .clickable { selectedImageForPreview = resultPhoto }
+                                                ) {
+                                                    AsyncImage(
+                                                        model = resultPhoto,
+                                                        contentDescription = "Candidate Match Result Screenshot",
+                                                        contentScale = ContentScale.Crop,
+                                                        modifier = Modifier.fillMaxSize()
                                                     )
-                                                    Spacer(modifier = Modifier.height(8.dp))
-                                                    Text(
-                                                        text = "Video Evidence Submitted",
-                                                        style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
-                                                        color = Color.White
-                                                    )
-                                                    Text(
-                                                        text = "Tap to open and play match video recording",
-                                                        style = MaterialTheme.typography.bodySmall,
-                                                        color = Color.White.copy(alpha = 0.7f)
-                                                    )
-                                                    Spacer(modifier = Modifier.height(10.dp))
-                                                    Button(
-                                                        onClick = { openMediaInSystem(context, mediaUrl, true) },
-                                                        shape = RoundedCornerShape(8.dp),
-                                                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+                                                    Surface(
+                                                        shape = RoundedCornerShape(4.dp),
+                                                        color = Color.Black.copy(alpha = 0.7f),
+                                                        modifier = Modifier
+                                                            .align(Alignment.BottomEnd)
+                                                            .padding(6.dp)
                                                     ) {
-                                                        Icon(Icons.Default.PlayArrow, contentDescription = null, modifier = Modifier.size(16.dp))
-                                                        Spacer(modifier = Modifier.width(6.dp))
-                                                        Text("Watch Video Evidence")
+                                                        Row(
+                                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                            verticalAlignment = Alignment.CenterVertically,
+                                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                        ) {
+                                                            Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                                            Text("Tap to Zoom", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                                        }
                                                     }
                                                 }
                                             }
-                                        } else {
-                                            // Photo Evidence Card with Zoom
-                                            Box(
-                                                modifier = Modifier
-                                                    .fillMaxWidth()
-                                                    .height(180.dp)
-                                                    .clip(RoundedCornerShape(10.dp))
-                                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                                    .clickable { selectedImageForPreview = mediaUrl }
-                                            ) {
-                                                AsyncImage(
-                                                    model = mediaUrl,
-                                                    contentDescription = "Report Evidence",
-                                                    contentScale = ContentScale.Crop,
-                                                    modifier = Modifier.fillMaxSize()
-                                                )
-                                                Surface(
-                                                    shape = RoundedCornerShape(4.dp),
-                                                    color = Color.Black.copy(alpha = 0.7f),
-                                                    modifier = Modifier
-                                                        .align(Alignment.BottomEnd)
-                                                        .padding(8.dp)
+                                        }
+                                    }
+
+                                    // 2. SEPARATE SECTION: DISPUTE & REPORT EVIDENCE (Distinct Red Themed Block)
+                                    if (app.isReported || app.reportReason.isNotBlank() || app.reportDescription.isNotBlank() || mediaUrl.isNotBlank()) {
+                                        Spacer(modifier = Modifier.height(10.dp))
+                                        Surface(
+                                            shape = RoundedCornerShape(10.dp),
+                                            color = AlertRed.copy(alpha = 0.08f),
+                                            border = BorderStroke(1.dp, AlertRed.copy(alpha = 0.5f)),
+                                            modifier = Modifier.fillMaxWidth()
+                                        ) {
+                                            Column(modifier = Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                                Row(
+                                                    verticalAlignment = Alignment.CenterVertically,
+                                                    horizontalArrangement = Arrangement.spacedBy(6.dp)
                                                 ) {
-                                                    Row(
-                                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                                                        verticalAlignment = Alignment.CenterVertically,
-                                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                    Icon(Icons.Default.Warning, contentDescription = null, tint = AlertRed, modifier = Modifier.size(18.dp))
+                                                    Text(
+                                                        text = "DISPUTE & FRAUD REPORT EVIDENCE",
+                                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                                        color = AlertRed
+                                                    )
+                                                }
+
+                                                if (app.reportReason.isNotBlank()) {
+                                                    Surface(
+                                                        shape = RoundedCornerShape(6.dp),
+                                                        color = AlertRed.copy(alpha = 0.15f),
+                                                        modifier = Modifier.fillMaxWidth()
                                                     ) {
-                                                        Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
-                                                        Text("Tap to Zoom", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                                        Text(
+                                                            text = "Dispute Reason: ${app.reportReason}",
+                                                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                            color = AlertRed,
+                                                            modifier = Modifier.padding(8.dp)
+                                                        )
+                                                    }
+                                                }
+
+                                                if (app.reportDescription.isNotBlank()) {
+                                                    Text(
+                                                        text = "Description: ${app.reportDescription}",
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                }
+
+                                                // Video or Photo Evidence for Dispute
+                                                if (mediaUrl.isNotBlank() && mediaUrl != resultPhoto) {
+                                                    if (isVideo) {
+                                                        Text(
+                                                            text = "🎥 Report Video Evidence Proof:",
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        Surface(
+                                                            shape = RoundedCornerShape(8.dp),
+                                                            color = Color.Black.copy(alpha = 0.9f),
+                                                            border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)),
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .clickable { openMediaInSystem(context, mediaUrl, true) }
+                                                        ) {
+                                                            Row(
+                                                                modifier = Modifier.padding(12.dp),
+                                                                verticalAlignment = Alignment.CenterVertically,
+                                                                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                                            ) {
+                                                                Icon(
+                                                                    imageVector = Icons.Default.PlayCircle,
+                                                                    contentDescription = "Play Video",
+                                                                    tint = Color.White,
+                                                                    modifier = Modifier.size(36.dp)
+                                                                )
+                                                                Column {
+                                                                    Text(
+                                                                        text = "🎬 Watch Dispute Evidence Video",
+                                                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                                        color = Color.White
+                                                                    )
+                                                                    Text(
+                                                                        text = "Tap to open & play video evidence in player",
+                                                                        style = MaterialTheme.typography.labelSmall,
+                                                                        color = Color.Gray
+                                                                    )
+                                                                }
+                                                            }
+                                                        }
+                                                    } else {
+                                                        Text(
+                                                            text = "📸 Report Photo Evidence Proof (Click to zoom):",
+                                                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                                            color = MaterialTheme.colorScheme.onSurface
+                                                        )
+                                                        Box(
+                                                            modifier = Modifier
+                                                                .fillMaxWidth()
+                                                                .height(180.dp)
+                                                                .clip(RoundedCornerShape(8.dp))
+                                                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                                                .clickable { selectedImageForPreview = mediaUrl }
+                                                        ) {
+                                                            AsyncImage(
+                                                                model = mediaUrl,
+                                                                contentDescription = "Report Proof Image",
+                                                                contentScale = ContentScale.Crop,
+                                                                modifier = Modifier.fillMaxSize()
+                                                            )
+                                                            Surface(
+                                                                shape = RoundedCornerShape(4.dp),
+                                                                color = Color.Black.copy(alpha = 0.7f),
+                                                                modifier = Modifier
+                                                                    .align(Alignment.BottomEnd)
+                                                                    .padding(6.dp)
+                                                            ) {
+                                                                Row(
+                                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                                                    verticalAlignment = Alignment.CenterVertically,
+                                                                    horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                                                ) {
+                                                                    Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                                                    Text("Tap to Zoom", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                                                }
+                                                            }
+                                                        }
                                                     }
                                                 }
                                             }
@@ -1781,48 +1958,79 @@ fun AdminResultsAndReportsDialog(
 
                                     Spacer(modifier = Modifier.height(12.dp))
 
-                                    // Admin Resolution & Payment Management Actions
-                                    Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                                        Row(
-                                            modifier = Modifier.fillMaxWidth(),
-                                            horizontalArrangement = Arrangement.spacedBy(8.dp)
-                                        ) {
-                                            if (onRefundOrCredit != null) {
-                                                Button(
-                                                    onClick = {
-                                                        onRefundOrCredit(app.uid, payoutAmount, "Dispute Resolution Refund")
-                                                    },
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    modifier = Modifier.weight(1f),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Refund Candidate (₹$payoutAmount)", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
-                                                }
+                                    // 3. SEPARATE SECTION: ADMIN SETTLEMENT & REFUND ACTIONS (In the last / bottom)
+                                    Text(
+                                        text = "Admin Payout & Settle Decision:",
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.height(6.dp))
 
-                                                Button(
-                                                    onClick = {
-                                                        onRefundOrCredit(hostUidToDisplay, payoutAmount, "Dispute Resolution Host Payout")
-                                                    },
-                                                    shape = RoundedCornerShape(8.dp),
-                                                    modifier = Modifier.weight(1f),
-                                                    colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                                                    contentPadding = PaddingValues(horizontal = 4.dp, vertical = 6.dp)
-                                                ) {
-                                                    Text("Pay Host (₹$payoutAmount)", style = MaterialTheme.typography.labelSmall.copy(fontSize = 11.sp))
-                                                }
-                                            }
-                                        }
-
-                                        OutlinedButton(
-                                            onClick = {
-                                                onDismissReport(app)
-                                                Toast.makeText(context, "Report dismissed / marked resolved", Toast.LENGTH_SHORT).show()
-                                            },
+                                    if (app.winningAmountSent) {
+                                        Surface(
                                             shape = RoundedCornerShape(8.dp),
+                                            color = SuccessGreen.copy(alpha = 0.15f),
                                             modifier = Modifier.fillMaxWidth()
                                         ) {
-                                            Text("Dismiss Report / Mark Resolved")
+                                            Row(
+                                                modifier = Modifier.padding(10.dp),
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                                            ) {
+                                                Icon(Icons.Default.CheckCircle, contentDescription = null, tint = SuccessGreen, modifier = Modifier.size(18.dp))
+                                                Text(
+                                                    text = "Prize of ₹$payoutAmount Fully Credited to Winner UID: ${app.winningAmountSentTo.ifBlank { winnerUid }}",
+                                                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                                                    color = SuccessGreen
+                                                )
+                                            }
+                                        }
+                                    } else {
+                                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                            // Primary Button 1: Pay Prize Fully
+                                            Button(
+                                                onClick = {
+                                                    defaultWinnerUidForPayout = winnerUid
+                                                    selectedAppForPayout = app
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
+                                            ) {
+                                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Pay Prize Fully (₹$payoutAmount) to Winner", fontWeight = FontWeight.Bold)
+                                            }
+
+                                            // Primary Button 2: Refund Entry Fee Option
+                                            Button(
+                                                onClick = {
+                                                    defaultRefundUid = app.uid
+                                                    defaultRefundAmount = payoutAmount.toString()
+                                                    defaultRefundReason = if (app.isReported) "Candidate Dispute Approved - Full Refund" else "Match Entry Fee Refund"
+                                                    selectedAppForRefund = app
+                                                },
+                                                modifier = Modifier.fillMaxWidth(),
+                                                shape = RoundedCornerShape(10.dp),
+                                                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
+                                            ) {
+                                                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                                                Spacer(modifier = Modifier.width(6.dp))
+                                                Text("Refund Entry Fee (₹$payoutAmount)", fontWeight = FontWeight.Bold)
+                                            }
+
+                                            if (app.isReported) {
+                                                OutlinedButton(
+                                                    onClick = {
+                                                        onDismissReport(app)
+                                                        Toast.makeText(context, "Report marked resolved", Toast.LENGTH_SHORT).show()
+                                                    },
+                                                    shape = RoundedCornerShape(8.dp),
+                                                    modifier = Modifier.fillMaxWidth()
+                                                ) {
+                                                    Text("Dismiss Report / Mark Resolved")
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1884,22 +2092,17 @@ fun AdminResultsAndReportsDialog(
         val app = selectedAppForPayout!!
         val defaultAmount = app.payout.toIntOrNull() ?: profile.payout.toIntOrNull() ?: 50
         var amountInput by remember { mutableStateOf(defaultAmount.toString()) }
-        var winnerUidInput by remember { mutableStateOf(app.winnerUid.ifBlank { app.uid }) }
+        var winnerUidInput by remember { mutableStateOf(defaultWinnerUidForPayout.ifBlank { app.winnerUid.ifBlank { app.uid } }) }
 
         AlertDialog(
             onDismissRequest = { selectedAppForPayout = null },
-            title = { Text("Send Prize Money to Winner", fontWeight = FontWeight.Bold) },
+            title = { Text("Pay Prize Fully to Winner", fontWeight = FontWeight.Bold) },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     Text(
-                        text = "Host: $hostActualName (UID: $hostGameUid)" + if (hostPhoneOrEmail.isNotBlank()) " | Contact: $hostPhoneOrEmail" else "",
+                        text = "Candidate: ${app.candidateName} (UID: ${app.uid})",
                         style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
                         color = MaterialTheme.colorScheme.onSurface
-                    )
-                    Text(
-                        text = "Candidate: ${app.candidateName} (UID: ${app.uid})",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     OutlinedTextField(
                         value = winnerUidInput,
@@ -1927,11 +2130,73 @@ fun AdminResultsAndReportsDialog(
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = SuccessGreen)
                 ) {
-                    Text("Confirm & Send")
+                    Text("Confirm & Pay Prize Fully")
                 }
             },
             dismissButton = {
                 TextButton(onClick = { selectedAppForPayout = null }) { Text("Cancel") }
+            }
+        )
+    }
+
+    // Refund Confirmation Dialog
+    if (selectedAppForRefund != null) {
+        val app = selectedAppForRefund!!
+        val defaultAmount = app.payout.toIntOrNull() ?: profile.payout.toIntOrNull() ?: 50
+        var amountInput by remember { mutableStateOf(defaultRefundAmount.ifBlank { defaultAmount.toString() }) }
+        var targetUidInput by remember { mutableStateOf(defaultRefundUid.ifBlank { app.uid }) }
+        var reasonInput by remember { mutableStateOf(defaultRefundReason.ifBlank { "Match Entry Fee Refund" }) }
+
+        AlertDialog(
+            onDismissRequest = { selectedAppForRefund = null },
+            title = { Text("Process Entry Fee Refund", fontWeight = FontWeight.Bold) },
+            text = {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                    Text(
+                        text = "Candidate: ${app.candidateName} (UID: ${app.uid})",
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                    OutlinedTextField(
+                        value = targetUidInput,
+                        onValueChange = { targetUidInput = it },
+                        label = { Text("Refund to Player UID") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = amountInput,
+                        onValueChange = { amountInput = it },
+                        label = { Text("Refund Amount (₹)") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                    OutlinedTextField(
+                        value = reasonInput,
+                        onValueChange = { reasonInput = it },
+                        label = { Text("Refund Reason / Note") },
+                        singleLine = true,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = {
+                        val amount = amountInput.toIntOrNull() ?: defaultAmount
+                        if (onRefundOrCredit != null) {
+                            onRefundOrCredit(targetUidInput.trim(), amount, reasonInput.trim())
+                        }
+                        Toast.makeText(context, "₹$amount refunded to UID: $targetUidInput!", Toast.LENGTH_SHORT).show()
+                        selectedAppForRefund = null
+                    },
+                    colors = ButtonDefaults.buttonColors(containerColor = Color(0xFFE65100))
+                ) {
+                    Text("Confirm & Process Refund")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { selectedAppForRefund = null }) { Text("Cancel") }
             }
         )
     }

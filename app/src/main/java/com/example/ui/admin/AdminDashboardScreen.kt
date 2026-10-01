@@ -1,5 +1,10 @@
 package com.example.ui.admin
 
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
+import android.content.Intent
+import android.net.Uri
 import android.widget.Toast
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.PickVisualMediaRequest
@@ -41,6 +46,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import coil.compose.AsyncImage
 import com.example.data.model.CustomProfileApplication
 import com.example.data.model.MatchItem
+import com.example.data.model.displayDate
 import com.example.data.model.MatchRegistration
 import com.example.data.model.MatchStatus
 import com.example.ui.viewmodel.TournamentViewModel
@@ -52,6 +58,31 @@ private val AdminPrimary = Color(0xFF1E88E5)
 private val AdminSuccess = Color(0xFF2E7D32)
 private val AdminAlert = Color(0xFFC62828)
 private val AdminGold = Color(0xFFD97706)
+private val AdminOrange = Color(0xFFE65100)
+
+private fun openMediaInSystem(context: Context, mediaUrl: String, isVideo: Boolean) {
+    try {
+        val uri = Uri.parse(mediaUrl)
+        val intent = Intent(Intent.ACTION_VIEW).apply {
+            if (isVideo) {
+                setDataAndType(uri, "video/*")
+            } else {
+                setDataAndType(uri, "image/*")
+            }
+            addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_GRANT_READ_URI_PERMISSION)
+        }
+        context.startActivity(intent)
+    } catch (e: Exception) {
+        try {
+            val browserIntent = Intent(Intent.ACTION_VIEW, Uri.parse(mediaUrl)).apply {
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            context.startActivity(browserIntent)
+        } catch (err: Exception) {
+            Toast.makeText(context, "Unable to open media: ${err.message}", Toast.LENGTH_SHORT).show()
+        }
+    }
+}
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -464,7 +495,7 @@ fun AdminMatchCard(
                 }
                 Column {
                     Text("Timing", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text("${match.date} ${match.time}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+                    Text("${match.displayDate} ${match.time}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
                 }
             }
 
@@ -868,6 +899,7 @@ fun AdminCustomRoomsTab(
 ) {
     var roomFilter by remember { mutableStateOf("All") }
     var selectedAppForPayout by remember { mutableStateOf<CustomProfileApplication?>(null) }
+    var selectedAppForRefund by remember { mutableStateOf<CustomProfileApplication?>(null) }
     var selectedScreenshotForPreview by remember { mutableStateOf<String?>(null) }
 
     val filteredApps = remember(applications, roomFilter) {
@@ -926,6 +958,7 @@ fun AdminCustomRoomsTab(
                         application = app,
                         onPreviewScreenshot = { selectedScreenshotForPreview = it },
                         onSendWinningAmount = { selectedAppForPayout = app },
+                        onRefund = { selectedAppForRefund = app },
                         onDismissReport = {
                             viewModel.submitMatchReport(app.id, "", "", "")
                         }
@@ -947,20 +980,33 @@ fun AdminCustomRoomsTab(
         )
     }
 
+    if (selectedAppForRefund != null) {
+        AdminRefundDialog(
+            application = selectedAppForRefund!!,
+            onDismiss = { selectedAppForRefund = null },
+            onRefund = { targetUid, amount, reason ->
+                viewModel.refundCustomRoomEntryFee(selectedAppForRefund!!, targetUid, amount, reason) {
+                    selectedAppForRefund = null
+                }
+            }
+        )
+    }
+
     if (selectedScreenshotForPreview != null) {
         AlertDialog(
             onDismissRequest = { selectedScreenshotForPreview = null },
-            title = { Text("Result Proof Screenshot", fontWeight = FontWeight.Bold) },
+            title = { Text("Result / Report Proof Preview", fontWeight = FontWeight.Bold) },
             text = {
                 Box(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(320.dp)
-                        .clip(RoundedCornerShape(10.dp))
+                        .height(340.dp)
+                        .clip(RoundedCornerShape(12.dp))
+                        .background(Color.Black)
                 ) {
                     AsyncImage(
                         model = selectedScreenshotForPreview,
-                        contentDescription = "Full Screenshot",
+                        contentDescription = "Full Proof Screenshot",
                         modifier = Modifier.fillMaxSize(),
                         contentScale = ContentScale.Fit
                     )
@@ -980,18 +1026,35 @@ fun AdminCustomRoomCard(
     application: CustomProfileApplication,
     onPreviewScreenshot: (String) -> Unit,
     onSendWinningAmount: () -> Unit,
+    onRefund: () -> Unit,
     onDismissReport: () -> Unit
 ) {
+    val context = LocalContext.current
+    val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+    val resultPhoto = application.resultScreenshot.ifBlank { application.candidateResultScreenshot.ifBlank { application.hostResultScreenshot } }
+    val reportMedia = application.reportMediaUrl
+    val isReportVideo = reportMedia.isNotBlank() && (
+        reportMedia.endsWith(".mp4", ignoreCase = true) ||
+        reportMedia.endsWith(".mkv", ignoreCase = true) ||
+        reportMedia.endsWith(".mov", ignoreCase = true) ||
+        reportMedia.endsWith(".3gp", ignoreCase = true) ||
+        reportMedia.contains("video", ignoreCase = true)
+    )
+    val winnerName = application.winnerName.ifBlank { application.candidateWinnerName.ifBlank { application.hostWinnerName.ifBlank { application.candidateName } } }
+    val winnerUid = application.winnerUid.ifBlank { application.candidateWinnerUid.ifBlank { application.hostWinnerUid.ifBlank { application.uid } } }
+    val payoutStr = application.payout.replace("[^0-9]".toRegex(), "").ifBlank { "500" }
+
     Card(
         shape = RoundedCornerShape(14.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(
             width = if (application.isReported) 1.5.dp else 1.dp,
-            color = if (application.isReported) AdminAlert.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
+            color = if (application.isReported) AdminAlert.copy(alpha = 0.6f) else MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)
         ),
         modifier = Modifier.fillMaxWidth().testTag("admin_custom_room_card_${application.id}")
     ) {
         Column(modifier = Modifier.padding(14.dp)) {
+            // Header: Room Name, Host Details & Status Badge
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
@@ -1019,6 +1082,7 @@ fun AdminCustomRoomCard(
                 Surface(
                     color = when {
                         application.winningAmountSent -> AdminSuccess.copy(alpha = 0.15f)
+                        application.status.startsWith("Refunded", ignoreCase = true) -> AdminOrange.copy(alpha = 0.15f)
                         application.isReported -> AdminAlert.copy(alpha = 0.15f)
                         application.isResultSubmitted -> AdminGold.copy(alpha = 0.2f)
                         application.status == "Paid" -> AdminPrimary.copy(alpha = 0.15f)
@@ -1028,7 +1092,8 @@ fun AdminCustomRoomCard(
                 ) {
                     Text(
                         text = when {
-                            application.winningAmountSent -> "PRIZE PAID"
+                            application.winningAmountSent -> "PRIZE PAID ✓"
+                            application.status.startsWith("Refunded", ignoreCase = true) -> "REFUNDED"
                             application.isReported -> "REPORTED ⚠️"
                             application.isResultSubmitted -> "RESULT READY"
                             else -> application.status.uppercase()
@@ -1037,6 +1102,7 @@ fun AdminCustomRoomCard(
                         fontWeight = FontWeight.Bold,
                         color = when {
                             application.winningAmountSent -> AdminSuccess
+                            application.status.startsWith("Refunded", ignoreCase = true) -> AdminOrange
                             application.isReported -> AdminAlert
                             application.isResultSubmitted -> AdminGold
                             application.status == "Paid" -> AdminPrimary
@@ -1049,6 +1115,7 @@ fun AdminCustomRoomCard(
 
             Spacer(modifier = Modifier.height(10.dp))
 
+            // Player Candidate Details
             Surface(
                 color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
                 shape = RoundedCornerShape(8.dp),
@@ -1068,21 +1135,29 @@ fun AdminCustomRoomCard(
                         )
                     }
                     Column(horizontalAlignment = Alignment.End) {
-                        Text("Player Level", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                        Text("Lv. ${application.level}", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Bold)
+                        Text("Prize Pool / Level", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text(
+                            text = "₹$payoutStr | Lv. ${application.level}",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontWeight = FontWeight.Bold,
+                            color = AdminGold
+                        )
                     }
                 }
             }
 
-            if (application.isResultSubmitted) {
+            // -------------------------------------------------------------
+            // SEPARATE SECTION 1: MATCH RESULT INFO (WITH PHOTO PROOF)
+            // -------------------------------------------------------------
+            if (application.isResultSubmitted || resultPhoto.isNotBlank()) {
                 Spacer(modifier = Modifier.height(10.dp))
                 Card(
                     colors = CardDefaults.cardColors(containerColor = AdminGold.copy(alpha = 0.08f)),
-                    border = BorderStroke(1.dp, AdminGold.copy(alpha = 0.3f)),
+                    border = BorderStroke(1.dp, AdminGold.copy(alpha = 0.35f)),
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
+                    modifier = Modifier.fillMaxWidth().testTag("admin_match_result_section_${application.id}")
                 ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
@@ -1091,130 +1166,329 @@ fun AdminCustomRoomCard(
                             Row(verticalAlignment = Alignment.CenterVertically) {
                                 Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = AdminGold, modifier = Modifier.size(18.dp))
                                 Spacer(Modifier.width(6.dp))
-                                Text("Match Result Submitted", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = AdminGold)
+                                Text(
+                                    text = "Match Result Info (Photo Proof)",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AdminGold
+                                )
                             }
-
-                            if (application.resultScreenshot.isNotBlank()) {
-                                TextButton(
-                                    onClick = { onPreviewScreenshot(application.resultScreenshot) },
-                                    contentPadding = PaddingValues(horizontal = 8.dp, vertical = 0.dp),
-                                    modifier = Modifier.height(24.dp)
-                                ) {
-                                    Icon(Icons.Default.Visibility, contentDescription = null, modifier = Modifier.size(12.dp))
-                                    Spacer(Modifier.width(4.dp))
-                                    Text("View Proof", style = MaterialTheme.typography.labelSmall)
-                                }
-                            }
-                        }
-
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Winner: ${application.winnerName.ifBlank { application.candidateName }} (UID: ${application.winnerUid.ifBlank { application.uid }})",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-
-                        if (application.winningAmountSent) {
-                            Spacer(modifier = Modifier.height(4.dp))
-                            Text(
-                                text = "✅ Winning amount sent to UID ${application.winningAmountSentTo}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = AdminSuccess,
-                                fontWeight = FontWeight.Bold
-                            )
-                        } else {
-                            Spacer(modifier = Modifier.height(8.dp))
-                            Button(
-                                onClick = onSendWinningAmount,
-                                colors = ButtonDefaults.buttonColors(containerColor = AdminSuccess),
-                                shape = RoundedCornerShape(8.dp),
-                                modifier = Modifier.fillMaxWidth().testTag("admin_send_winning_amount_button_${application.id}")
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = AdminGold.copy(alpha = 0.2f)
                             ) {
-                                Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(16.dp))
-                                Spacer(Modifier.width(6.dp))
-                                Text("Verify & Send Winning Amount (₹)", fontWeight = FontWeight.Bold)
+                                Text(
+                                    text = "By " + (if (application.resultSubmittedBy.isNotBlank()) application.resultSubmittedBy else "Candidate"),
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp, fontWeight = FontWeight.Bold),
+                                    color = AdminGold,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
                             }
-                        }
-                    }
-                }
-            }
-
-            if (application.isReported) {
-                Spacer(modifier = Modifier.height(10.dp))
-                Card(
-                    colors = CardDefaults.cardColors(containerColor = AdminAlert.copy(alpha = 0.08f)),
-                    border = BorderStroke(1.dp, AdminAlert.copy(alpha = 0.3f)),
-                    shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    Column(modifier = Modifier.padding(10.dp)) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(Icons.Default.Warning, contentDescription = null, tint = AdminAlert, modifier = Modifier.size(18.dp))
-                            Spacer(Modifier.width(6.dp))
-                            Text("Candidate Report Filed", style = MaterialTheme.typography.titleSmall, fontWeight = FontWeight.Bold, color = AdminAlert)
-                        }
-                        Spacer(modifier = Modifier.height(4.dp))
-                        Text(
-                            text = "Reason: ${application.reportReason.ifBlank { "Unfair gameplay / dispute" }}",
-                            style = MaterialTheme.typography.bodySmall,
-                            fontWeight = FontWeight.SemiBold
-                        )
-                        if (application.reportDescription.isNotBlank()) {
-                            Text(
-                                text = "Details: ${application.reportDescription}",
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
                         }
 
                         Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            modifier = Modifier.fillMaxWidth(),
-                            horizontalArrangement = Arrangement.End
-                        ) {
-                            OutlinedButton(
-                                onClick = onDismissReport,
-                                shape = RoundedCornerShape(6.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp)
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Text(
+                                text = "Declared Winner: ",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Text(
+                                text = "$winnerName (UID: $winnerUid)",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            IconButton(
+                                onClick = {
+                                    clipboard.setPrimaryClip(ClipData.newPlainText("Winner UID", winnerUid))
+                                    Toast.makeText(context, "Winner UID copied: $winnerUid", Toast.LENGTH_SHORT).show()
+                                },
+                                modifier = Modifier.size(24.dp)
                             ) {
-                                Text("Dismiss Report", style = MaterialTheme.typography.labelSmall)
+                                Icon(Icons.Default.ContentCopy, contentDescription = "Copy UID", modifier = Modifier.size(14.dp), tint = AdminGold)
                             }
-                            Spacer(Modifier.width(8.dp))
-                            Button(
-                                onClick = onSendWinningAmount,
-                                colors = ButtonDefaults.buttonColors(containerColor = AdminPrimary),
-                                shape = RoundedCornerShape(6.dp),
-                                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp),
-                                modifier = Modifier.height(28.dp)
+                        }
+
+                        if (resultPhoto.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Text(
+                                text = "📸 Match Result Screenshot Proof:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(150.dp)
+                                    .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black.copy(alpha = 0.85f))
+                                    .clickable { onPreviewScreenshot(resultPhoto) }
                             ) {
-                                Text("Award Winner", style = MaterialTheme.typography.labelSmall)
+                                AsyncImage(
+                                    model = resultPhoto,
+                                    contentDescription = "Match Result Screenshot",
+                                    contentScale = ContentScale.Crop,
+                                    modifier = Modifier.fillMaxSize()
+                                )
+                                Surface(
+                                    shape = RoundedCornerShape(4.dp),
+                                    color = Color.Black.copy(alpha = 0.75f),
+                                    modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                        Text("Tap to Zoom Photo", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                    }
+                                }
                             }
                         }
                     }
                 }
             }
 
-            if (!application.isResultSubmitted && !application.isReported) {
-                Spacer(modifier = Modifier.height(8.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
+            // -------------------------------------------------------------
+            // SEPARATE SECTION 2: DISPUTE & REPORT INFO (WITH PHOTO & VIDEO)
+            // -------------------------------------------------------------
+            if (application.isReported || application.reportReason.isNotBlank() || application.reportDescription.isNotBlank() || reportMedia.isNotBlank()) {
+                Spacer(modifier = Modifier.height(10.dp))
+                Card(
+                    colors = CardDefaults.cardColors(containerColor = AdminAlert.copy(alpha = 0.08f)),
+                    border = BorderStroke(1.dp, AdminAlert.copy(alpha = 0.4f)),
+                    shape = RoundedCornerShape(10.dp),
+                    modifier = Modifier.fillMaxWidth().testTag("admin_report_section_${application.id}")
                 ) {
-                    Text(
-                        text = if (application.roomId?.isNotBlank() == true) "Room ID: ${application.roomId}" else "Room not started",
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                    )
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(Icons.Default.Warning, contentDescription = null, tint = AdminAlert, modifier = Modifier.size(18.dp))
+                                Spacer(Modifier.width(6.dp))
+                                Text(
+                                    text = "Dispute & Report Info (Photo & Video)",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AdminAlert
+                                )
+                            }
+                            Surface(
+                                shape = RoundedCornerShape(4.dp),
+                                color = AdminAlert.copy(alpha = 0.2f)
+                            ) {
+                                Text(
+                                    text = "DISPUTE FILED",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontSize = 9.sp, fontWeight = FontWeight.Bold),
+                                    color = AdminAlert,
+                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                )
+                            }
+                        }
 
-                    OutlinedButton(
-                        onClick = onSendWinningAmount,
-                        shape = RoundedCornerShape(8.dp),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp),
-                        modifier = Modifier.height(30.dp)
+                        if (application.reportReason.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = AdminAlert.copy(alpha = 0.15f),
+                                modifier = Modifier.fillMaxWidth()
+                            ) {
+                                Text(
+                                    text = "Reason: ${application.reportReason}",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AdminAlert,
+                                    modifier = Modifier.padding(8.dp)
+                                )
+                            }
+                        }
+
+                        if (application.reportDescription.isNotBlank()) {
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Description: ${application.reportDescription}",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        // Video or Photo Evidence for Report
+                        if (reportMedia.isNotBlank() && reportMedia != resultPhoto) {
+                            Spacer(modifier = Modifier.height(8.dp))
+                            if (isReportVideo) {
+                                Text(
+                                    text = "🎥 Report Video Evidence Proof:",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = Color.Black.copy(alpha = 0.9f),
+                                    border = BorderStroke(1.dp, AdminPrimary.copy(alpha = 0.6f)),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .clickable { openMediaInSystem(context, reportMedia, true) }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(12.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.PlayCircle,
+                                            contentDescription = "Play Video",
+                                            tint = Color.White,
+                                            modifier = Modifier.size(32.dp)
+                                        )
+                                        Column {
+                                            Text(
+                                                text = "🎬 Watch Dispute Evidence Video",
+                                                style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                                color = Color.White
+                                            )
+                                            Text(
+                                                text = "Tap to open and play video evidence",
+                                                style = MaterialTheme.typography.labelSmall,
+                                                color = Color.LightGray
+                                            )
+                                        }
+                                    }
+                                }
+                            } else {
+                                Text(
+                                    text = "📸 Report Photo Evidence Proof (Click to zoom):",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.SemiBold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                                Spacer(modifier = Modifier.height(4.dp))
+                                Box(
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .height(150.dp)
+                                        .clip(RoundedCornerShape(8.dp))
+                                    .background(Color.Black.copy(alpha = 0.85f))
+                                    .clickable { onPreviewScreenshot(reportMedia) }
+                                ) {
+                                    AsyncImage(
+                                        model = reportMedia,
+                                        contentDescription = "Report Proof Photo",
+                                        contentScale = ContentScale.Crop,
+                                        modifier = Modifier.fillMaxSize()
+                                    )
+                                    Surface(
+                                        shape = RoundedCornerShape(4.dp),
+                                        color = Color.Black.copy(alpha = 0.75f),
+                                        modifier = Modifier.align(Alignment.BottomEnd).padding(6.dp)
+                                    ) {
+                                        Row(
+                                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
+                                            verticalAlignment = Alignment.CenterVertically,
+                                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                        ) {
+                                            Icon(Icons.Default.Visibility, contentDescription = null, tint = Color.White, modifier = Modifier.size(12.dp))
+                                            Text("Tap to Zoom Photo", color = Color.White, style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp))
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // -------------------------------------------------------------
+            // SEPARATE SECTION 3: IN THE LAST -> GIVE OPTION REFUND & PAY PRIZE FULLY
+            // -------------------------------------------------------------
+            Spacer(modifier = Modifier.height(12.dp))
+            Text(
+                text = "Settlement & Action Options:",
+                style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            Spacer(modifier = Modifier.height(6.dp))
+
+            if (application.winningAmountSent) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = AdminSuccess.copy(alpha = 0.15f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
                     ) {
-                        Text("Send Winning Amount", style = MaterialTheme.typography.labelSmall)
+                        Icon(Icons.Default.CheckCircle, contentDescription = null, tint = AdminSuccess, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = "✅ Prize of ₹$payoutStr Fully Paid to Winner (UID: ${application.winningAmountSentTo.ifBlank { winnerUid }})",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = AdminSuccess
+                        )
+                    }
+                }
+            } else if (application.status.startsWith("Refunded", ignoreCase = true)) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = AdminOrange.copy(alpha = 0.15f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, tint = AdminOrange, modifier = Modifier.size(18.dp))
+                        Text(
+                            text = "🔄 Entry Fee Refund Processed for this Match (${application.status})",
+                            style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold),
+                            color = AdminOrange
+                        )
+                    }
+                }
+            } else {
+                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                    // Option 1: Pay Prize Fully to Winner
+                    Button(
+                        onClick = onSendWinningAmount,
+                        colors = ButtonDefaults.buttonColors(containerColor = AdminSuccess),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_pay_prize_fully_button_${application.id}")
+                    ) {
+                        Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Pay Prize Fully (₹$payoutStr) to Winner", fontWeight = FontWeight.Bold)
+                    }
+
+                    // Option 2: Refund Entry Fee to Player
+                    Button(
+                        onClick = onRefund,
+                        colors = ButtonDefaults.buttonColors(containerColor = AdminOrange),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("admin_refund_button_${application.id}")
+                    ) {
+                        Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Spacer(Modifier.width(6.dp))
+                        Text("Refund Entry Fee (₹$payoutStr)", fontWeight = FontWeight.Bold)
+                    }
+
+                    if (application.isReported) {
+                        OutlinedButton(
+                            onClick = onDismissReport,
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().testTag("admin_dismiss_report_button_${application.id}")
+                        ) {
+                            Text("Dismiss Report / Mark Resolved", style = MaterialTheme.typography.labelSmall)
+                        }
                     }
                 }
             }
@@ -1346,12 +1620,18 @@ fun CreateOrEditMatchDialog(
 ) {
     val isEdit = existingMatch != null
 
-    val todayDate = remember {
+    val dateOptions = remember {
         val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
-        dateFormat.format(java.util.Calendar.getInstance().time)
-    }
-    val dateOptions = remember(todayDate) {
-        listOf(todayDate)
+        (0 until 12).map { offset ->
+            val cal = java.util.Calendar.getInstance()
+            cal.add(java.util.Calendar.DAY_OF_YEAR, offset)
+            val dStr = dateFormat.format(cal.time)
+            when (offset) {
+                0 -> "Today, $dStr"
+                1 -> "Tomorrow, $dStr"
+                else -> dStr
+            }
+        }
     }
     val timeOptions = remember {
         listOf("10:00 AM", "11:00 AM", "12:00 PM", "1:00 PM", "2:00 PM", "3:00 PM", "4:00 PM", "5:00 PM", "6:00 PM", "7:00 PM", "8:00 PM", "9:00 PM", "10:00 PM")
@@ -1359,6 +1639,8 @@ fun CreateOrEditMatchDialog(
 
     var dateExpanded by remember { mutableStateOf(false) }
     var timeExpanded by remember { mutableStateOf(false) }
+    var formatExpanded by remember { mutableStateOf(false) }
+    val formatOptions = remember { listOf("Solo", "Duo") }
 
     var category by remember { mutableStateOf(if (existingMatch?.name?.contains("Weekly", ignoreCase = true) == true) "Weekly" else if (existingMatch != null) "Daily" else defaultCategory) }
     var matchName by remember { mutableStateOf(existingMatch?.name?.replace("Daily ", "")?.replace("Weekly ", "") ?: "Clash Squad Blitz") }
@@ -1370,18 +1652,27 @@ fun CreateOrEditMatchDialog(
     var dateStr by remember {
         mutableStateOf(
             if (existingMatch?.date?.isNotBlank() == true) {
-                if (existingMatch.date.equals("Today", ignoreCase = true)) todayDate
-                else existingMatch.date
-            } else todayDate
+                val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
+                val todayStr = dateFormat.format(java.util.Calendar.getInstance().time)
+                val tomCal = java.util.Calendar.getInstance()
+                tomCal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+                val tomStr = dateFormat.format(tomCal.time)
+                val raw = existingMatch.date.trim()
+                when {
+                    raw.equals("Today", ignoreCase = true) || raw.equals(todayStr, ignoreCase = true) -> "Today, $todayStr"
+                    raw.equals("Tomorrow", ignoreCase = true) || raw.equals(tomStr, ignoreCase = true) -> "Tomorrow, $tomStr"
+                    raw.startsWith("Today, ", ignoreCase = true) || raw.startsWith("Tomorrow, ", ignoreCase = true) -> raw
+                    else -> raw
+                }
+            } else dateOptions.first()
         )
     }
     var timeStr by remember { mutableStateOf(existingMatch?.time ?: "08:00 PM") }
     var formatStr by remember {
         mutableStateOf(
             when (existingMatch?.format?.trim()?.lowercase()) {
-                "solo" -> "Solo"
                 "duo" -> "Duo"
-                else -> "Squad"
+                else -> "Solo"
             }
         )
     }
@@ -1548,39 +1839,62 @@ fun CreateOrEditMatchDialog(
                     )
                 }
 
-                // Format Selection: Options only (Solo, Duo, Squad)
-                Column(
-                    modifier = Modifier.fillMaxWidth(),
-                    verticalArrangement = Arrangement.spacedBy(4.dp)
+                // Format Selection: Vertical Column Dropdown after click (Solo / Duo)
+                @OptIn(ExperimentalMaterial3Api::class)
+                ExposedDropdownMenuBox(
+                    expanded = formatExpanded,
+                    onExpandedChange = { formatExpanded = !formatExpanded },
+                    modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text(
-                        text = "Match Format",
-                        style = MaterialTheme.typography.labelMedium,
-                        fontWeight = FontWeight.SemiBold
+                    OutlinedTextField(
+                        value = formatStr,
+                        onValueChange = {},
+                        readOnly = true,
+                        label = { Text("MATCH FORMAT") },
+                        placeholder = { Text("Select Solo or Duo") },
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = formatExpanded) },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .menuAnchor()
+                            .testTag("admin_format_select")
                     )
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ExposedDropdownMenu(
+                        expanded = formatExpanded,
+                        onDismissRequest = { formatExpanded = false }
                     ) {
-                        listOf("Solo", "Duo", "Squad").forEach { opt ->
-                            val isSelected = formatStr.equals(opt, ignoreCase = true)
-                            Button(
-                                onClick = { formatStr = opt },
-                                modifier = Modifier
-                                    .weight(1f)
-                                    .testTag("admin_format_$opt"),
-                                colors = ButtonDefaults.buttonColors(
-                                    containerColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-                                    contentColor = if (isSelected) Color.White else MaterialTheme.colorScheme.onSurface
-                                ),
-                                shape = RoundedCornerShape(8.dp)
-                            ) {
-                                Text(
-                                    text = opt,
-                                    fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
-                                    fontSize = 13.sp
-                                )
-                            }
+                        formatOptions.forEach { option ->
+                            val isSelected = formatStr.equals(option, ignoreCase = true)
+                            DropdownMenuItem(
+                                text = {
+                                    Text(
+                                        text = option,
+                                        fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                        color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                                    )
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = if (option == "Solo") Icons.Default.Person else Icons.Default.Group,
+                                        contentDescription = null,
+                                        tint = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                },
+                                trailingIcon = if (isSelected) {
+                                    {
+                                        Icon(
+                                            imageVector = Icons.Default.Check,
+                                            contentDescription = "Selected",
+                                            tint = MaterialTheme.colorScheme.primary,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                    }
+                                } else null,
+                                onClick = {
+                                    formatStr = option
+                                    formatExpanded = false
+                                },
+                                modifier = Modifier.testTag("admin_format_option_${option.lowercase()}")
+                            )
                         }
                     }
                 }
@@ -1807,17 +2121,21 @@ fun SendWinningAmountDialog(
         onDismiss()
     }
 
-    val initialWinnerUid = application.winnerUid.ifBlank { application.uid }
+    val initialWinnerUid = application.winnerUid.ifBlank { application.candidateWinnerUid.ifBlank { application.hostWinnerUid.ifBlank { application.uid } } }
     val initialAmount = application.payout.replace("[^0-9]".toRegex(), "").ifBlank { "500" }
 
     var winnerUid by remember { mutableStateOf(initialWinnerUid) }
-    var winnerName by remember { mutableStateOf(application.winnerName.ifBlank { application.candidateName }) }
+    var winnerName by remember { mutableStateOf(application.winnerName.ifBlank { application.candidateWinnerName.ifBlank { application.hostWinnerName.ifBlank { application.candidateName } } }) }
     var amountStr by remember { mutableStateOf(initialAmount) }
 
     AlertDialog(
         onDismissRequest = safeDismiss,
         title = {
-            Text("Send Winning Amount", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.EmojiEvents, contentDescription = null, tint = AdminGold, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Pay Prize Fully to Winner", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
         },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -1828,13 +2146,13 @@ fun SendWinningAmountDialog(
                 ) {
                     Column(modifier = Modifier.padding(10.dp)) {
                         Text(
-                            text = "Room: ${application.profileName}",
+                            text = "Room: ${application.profileName.ifBlank { "Custom Room Match" }}",
                             style = MaterialTheme.typography.labelLarge,
                             fontWeight = FontWeight.Bold,
                             color = AdminGold
                         )
                         Text(
-                            text = "Disburse prize pool to the verified winner's in-app wallet balance.",
+                            text = "Disburse full winning prize to verified winner's in-app wallet balance.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -1860,7 +2178,7 @@ fun SendWinningAmountDialog(
                 OutlinedTextField(
                     value = amountStr,
                     onValueChange = { amountStr = it },
-                    label = { Text("Winning Amount (₹)") },
+                    label = { Text("Full Prize Amount (₹)") },
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("admin_winning_amount_input")
@@ -1873,7 +2191,7 @@ fun SendWinningAmountDialog(
                     keyboardController?.hide()
                     focusManager.clearFocus()
                     val amount = amountStr.toIntOrNull() ?: 0
-                    onSend(winnerUid, amount)
+                    onSend(winnerUid.trim(), amount)
                 },
                 enabled = winnerUid.isNotBlank() && (amountStr.toIntOrNull() ?: 0) > 0,
                 colors = ButtonDefaults.buttonColors(containerColor = AdminSuccess),
@@ -1881,7 +2199,107 @@ fun SendWinningAmountDialog(
             ) {
                 Icon(Icons.Default.AccountBalanceWallet, contentDescription = null, modifier = Modifier.size(16.dp))
                 Spacer(Modifier.width(6.dp))
-                Text("Confirm & Disburse ₹$amountStr")
+                Text("Confirm & Pay Prize Fully (₹$amountStr)")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = safeDismiss) { Text("Cancel") }
+        }
+    )
+}
+
+@Composable
+fun AdminRefundDialog(
+    application: CustomProfileApplication,
+    onDismiss: () -> Unit,
+    onRefund: (targetUid: String, amount: Int, reason: String) -> Unit
+) {
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager = LocalFocusManager.current
+
+    val safeDismiss = {
+        keyboardController?.hide()
+        focusManager.clearFocus()
+        onDismiss()
+    }
+
+    val defaultAmount = application.payout.replace("[^0-9]".toRegex(), "").ifBlank { "500" }
+    var targetUid by remember { mutableStateOf(application.uid) }
+    var amountStr by remember { mutableStateOf(defaultAmount) }
+    var refundReason by remember { mutableStateOf(if (application.isReported) "Dispute Approved - Full Refund" else "Match Entry Fee Refund") }
+
+    AlertDialog(
+        onDismissRequest = safeDismiss,
+        title = {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Icon(Icons.Default.Refresh, contentDescription = null, tint = AdminOrange, modifier = Modifier.size(24.dp))
+                Spacer(Modifier.width(8.dp))
+                Text("Process Entry Fee Refund", fontWeight = FontWeight.Bold, fontSize = 18.sp)
+            }
+        },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Surface(
+                    color = AdminOrange.copy(alpha = 0.15f),
+                    shape = RoundedCornerShape(8.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(10.dp)) {
+                        Text(
+                            text = "Refund to Candidate: ${application.candidateName}",
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = AdminOrange
+                        )
+                        Text(
+                            text = "Refund entry fee or match deposit directly to player wallet balance.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = targetUid,
+                    onValueChange = { targetUid = it },
+                    label = { Text("Player Free Fire UID") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("admin_refund_uid_input")
+                )
+
+                OutlinedTextField(
+                    value = amountStr,
+                    onValueChange = { amountStr = it },
+                    label = { Text("Refund Amount (₹)") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("admin_refund_amount_input")
+                )
+
+                OutlinedTextField(
+                    value = refundReason,
+                    onValueChange = { refundReason = it },
+                    label = { Text("Refund Reason / Note") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("admin_refund_reason_input")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    keyboardController?.hide()
+                    focusManager.clearFocus()
+                    val amount = amountStr.toIntOrNull() ?: 0
+                    onRefund(targetUid.trim(), amount, refundReason.trim())
+                },
+                enabled = targetUid.isNotBlank() && (amountStr.toIntOrNull() ?: 0) > 0,
+                colors = ButtonDefaults.buttonColors(containerColor = AdminOrange),
+                modifier = Modifier.testTag("admin_confirm_refund_button")
+            ) {
+                Icon(Icons.Default.Refresh, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(Modifier.width(6.dp))
+                Text("Confirm & Refund (₹$amountStr)")
             }
         },
         dismissButton = {

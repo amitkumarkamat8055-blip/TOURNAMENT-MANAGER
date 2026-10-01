@@ -42,14 +42,6 @@ object AdminConfig {
             accountUsername?.startsWith("admin_", ignoreCase = true) == true) {
             return true
         }
-        // If an account is logged in and not matching admin credentials above, it is NOT admin
-        if (!accountPhone.isNullOrBlank() || !accountUsername.isNullOrBlank()) {
-            return false
-        }
-        // Explicit Admin UID always has admin privileges if no regular account is logged in
-        if (!firebaseUid.isNullOrBlank() && (firebaseUid == ADMIN_UID || ADMIN_UIDS.contains(firebaseUid))) {
-            return true
-        }
         return false
     }
 }

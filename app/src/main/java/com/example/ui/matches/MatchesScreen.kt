@@ -91,6 +91,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.MatchItem
 import com.example.data.model.isDailyMatch
 import com.example.data.model.getEffectivePerKill
+import com.example.data.model.displayDate
 import com.example.ui.admin.CreateOrEditMatchDialog
 import com.example.ui.admin.SendRoomIdDialog
 import com.example.ui.components.AppHeader
@@ -119,8 +120,10 @@ fun MatchesScreen(
   val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
   val isAdmin by viewModel.isAdmin.collectAsStateWithLifecycle()
 
-  val statuses = listOf("All", "Upcoming", "Ongoing", "Completed")
+  val statuses = listOf("All", "Ongoing", "Upcoming", "Completed")
   var selectedTab by remember { mutableIntStateOf(0) }
+  var dailyStatus by remember { mutableStateOf("All") }
+  var weeklyStatus by remember { mutableStateOf("All") }
   var showCreateMatchDialog by remember { mutableStateOf(false) }
   var matchToEdit by remember { mutableStateOf<MatchItem?>(null) }
   var matchToDelete by remember { mutableStateOf<MatchItem?>(null) }
@@ -179,17 +182,28 @@ fun MatchesScreen(
   matchToDelete?.let { match ->
     AlertDialog(
       onDismissRequest = { matchToDelete = null },
-      title = { Text("Delete Match", fontWeight = FontWeight.Bold) },
-      text = { Text("Are you sure you want to delete '${match.name}'? This cannot be undone.") },
+      icon = {
+        Icon(
+          imageVector = Icons.Default.Delete,
+          contentDescription = "Delete",
+          tint = AlertRed,
+          modifier = Modifier.size(28.dp)
+        )
+      },
+      title = { Text("Delete Match?", fontWeight = FontWeight.Bold) },
+      text = {
+        Text("Are you sure you want to delete '${match.name}'? All candidate registrations, broadcast credentials, and match details will be permanently removed. This action cannot be undone.")
+      },
       confirmButton = {
         Button(
           onClick = {
             viewModel.deleteTournamentMatch(match.id)
             matchToDelete = null
           },
-          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+          modifier = Modifier.testTag("confirm_delete_match_button")
         ) {
-          Text("Delete")
+          Text("Delete Match", color = Color.White)
         }
       },
       dismissButton = {
@@ -268,13 +282,7 @@ fun MatchesScreen(
         logoIcon = if (isAdmin) Icons.Default.AdminPanelSettings else Icons.Default.SportsEsports
       )
 
-    // Status Filter Chips
-    CategoryFilterRow(
-      categories = statuses,
-      selectedCategory = selectedStatus,
-      onCategorySelected = { viewModel.setSelectedStatus(it) }
-    )
-
+    // Daily and Weekly Match Section Tabs
     androidx.compose.material3.TabRow(
       selectedTabIndex = selectedTab,
       containerColor = MaterialTheme.colorScheme.background,
@@ -288,15 +296,36 @@ fun MatchesScreen(
     ) {
       androidx.compose.material3.Tab(
         selected = selectedTab == 0,
-        onClick = { selectedTab = 0 },
+        onClick = {
+          selectedTab = 0
+          viewModel.setSelectedStatus(dailyStatus)
+        },
         text = { androidx.compose.material3.Text("Daily", style = MaterialTheme.typography.labelLarge) }
       )
       androidx.compose.material3.Tab(
         selected = selectedTab == 1,
-        onClick = { selectedTab = 1 },
+        onClick = {
+          selectedTab = 1
+          viewModel.setSelectedStatus(weeklyStatus)
+        },
         text = { androidx.compose.material3.Text("Weekly", style = MaterialTheme.typography.labelLarge) }
       )
     }
+
+    // Status Filter Chips (All, Ongoing, Upcoming, Completed) placed under Daily & Weekly match sections
+    val currentSectionStatus = if (selectedTab == 0) dailyStatus else weeklyStatus
+    CategoryFilterRow(
+      categories = statuses,
+      selectedCategory = currentSectionStatus,
+      onCategorySelected = { status ->
+        if (selectedTab == 0) {
+          dailyStatus = status
+        } else {
+          weeklyStatus = status
+        }
+        viewModel.setSelectedStatus(status)
+      }
+    )
 
     // Matches List (Exclusively Free Fire MAX tournaments)
     val isRefreshing by viewModel.isRefreshing.collectAsStateWithLifecycle()
@@ -458,7 +487,7 @@ fun MatchCard(
             .padding(horizontal = 14.dp, vertical = 10.dp),
           verticalArrangement = Arrangement.SpaceBetween
         ) {
-          // Top Row inside Banner: Match # Badge, Free Fire MAX badge, Status Badge, Admin actions
+          // Top Row inside Banner: Match # Badge, Free Fire MAX badge, Status Badge, Admin actions (Edit & Delete)
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -466,7 +495,8 @@ fun MatchCard(
           ) {
             Row(
               verticalAlignment = Alignment.CenterVertically,
-              horizontalArrangement = Arrangement.spacedBy(6.dp)
+              horizontalArrangement = Arrangement.spacedBy(5.dp),
+              modifier = Modifier.weight(1f, fill = false)
             ) {
               MatchNumberBadge(number = match.matchNumber)
 
@@ -478,7 +508,7 @@ fun MatchCard(
               ) {
                 Row(
                   verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                  modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
                 ) {
                   Icon(
                     imageVector = Icons.Default.Whatshot,
@@ -491,8 +521,8 @@ fun MatchCard(
                     text = "FREE FIRE MAX",
                     style = MaterialTheme.typography.labelSmall.copy(
                       fontWeight = FontWeight.Black,
-                      fontSize = 10.sp,
-                      letterSpacing = 0.6.sp
+                      fontSize = 9.5.sp,
+                      letterSpacing = 0.4.sp
                     ),
                     color = Color(0xFFFFCC80)
                   )
@@ -500,31 +530,44 @@ fun MatchCard(
               }
             }
 
-            Row(verticalAlignment = Alignment.CenterVertically) {
+            Row(
+              verticalAlignment = Alignment.CenterVertically,
+              horizontalArrangement = Arrangement.spacedBy(4.dp)
+            ) {
               StatusBadge(status = match.status)
               if (isAdmin) {
-                Spacer(modifier = Modifier.width(4.dp))
-                IconButton(
-                  onClick = onEditClick,
-                  modifier = Modifier.size(28.dp).testTag("btn_edit_match_${match.id}")
+                Surface(
+                  shape = RoundedCornerShape(8.dp),
+                  color = Color.Black.copy(alpha = 0.65f),
+                  border = BorderStroke(0.5.dp, Color.White.copy(alpha = 0.2f))
                 ) {
-                  Icon(
-                    imageVector = Icons.Default.Edit,
-                    contentDescription = "Edit Match",
-                    tint = Color.White,
-                    modifier = Modifier.size(16.dp)
-                  )
-                }
-                IconButton(
-                  onClick = onDeleteClick,
-                  modifier = Modifier.size(28.dp).testTag("btn_delete_match_${match.id}")
-                ) {
-                  Icon(
-                    imageVector = Icons.Default.Delete,
-                    contentDescription = "Delete Match",
-                    tint = AlertRed,
-                    modifier = Modifier.size(16.dp)
-                  )
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.padding(horizontal = 2.dp, vertical = 1.dp)
+                  ) {
+                    IconButton(
+                      onClick = onEditClick,
+                      modifier = Modifier.size(26.dp).testTag("btn_edit_match_${match.id}")
+                    ) {
+                      Icon(
+                        imageVector = Icons.Default.Edit,
+                        contentDescription = "Edit Match",
+                        tint = Color.White,
+                        modifier = Modifier.size(14.dp)
+                      )
+                    }
+                    IconButton(
+                      onClick = onDeleteClick,
+                      modifier = Modifier.size(26.dp).testTag("btn_delete_match_${match.id}")
+                    ) {
+                      Icon(
+                        imageVector = Icons.Default.Delete,
+                        contentDescription = "Delete Match",
+                        tint = AlertRed,
+                        modifier = Modifier.size(14.dp)
+                      )
+                    }
+                  }
                 }
               }
             }
@@ -605,7 +648,7 @@ fun MatchCard(
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                  text = match.date,
+                  text = match.displayDate,
                   style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.sp

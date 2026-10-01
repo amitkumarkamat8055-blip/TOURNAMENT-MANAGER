@@ -112,6 +112,7 @@ import com.example.data.model.MatchItem
 import com.example.data.model.PrizeBreakdown
 import com.example.data.model.isDailyMatch
 import com.example.data.model.getEffectivePerKill
+import com.example.data.model.displayDate
 import com.example.ui.admin.SendRoomIdDialog
 import com.example.ui.components.MatchNumberBadge
 import com.example.ui.components.StatusBadge
@@ -145,6 +146,7 @@ fun MatchDetailsScreen(
   var showEditRulesDialog by remember { mutableStateOf(false) }
   var showEditPrizeDialog by remember { mutableStateOf(false) }
   var showEditLevelDialog by remember { mutableStateOf(false) }
+  var showDeleteMatchDialog by remember { mutableStateOf(false) }
   var currentTimeMillis by remember { mutableStateOf(System.currentTimeMillis()) }
 
   LaunchedEffect(Unit) {
@@ -223,6 +225,18 @@ fun MatchDetailsScreen(
           navigationIconContentColor = MaterialTheme.colorScheme.onSurface
         ),
         actions = {
+          if (isAdmin && currentMatch != null) {
+            IconButton(
+              onClick = { showDeleteMatchDialog = true },
+              modifier = Modifier.testTag("details_admin_delete_match_button")
+            ) {
+              Icon(
+                imageVector = Icons.Default.Delete,
+                contentDescription = "Delete Match",
+                tint = AlertRed
+              )
+            }
+          }
           IconButton(onClick = {
             val sendIntent = android.content.Intent().apply {
               action = android.content.Intent.ACTION_SEND
@@ -876,7 +890,7 @@ fun MatchDetailsScreen(
                   color = MaterialTheme.colorScheme.onSurfaceVariant
                 )
                 Text(
-                  text = currentMatch.date,
+                  text = currentMatch.displayDate,
                   style = MaterialTheme.typography.bodyMedium.copy(
                     fontWeight = FontWeight.Bold,
                     fontSize = 14.sp
@@ -2206,6 +2220,43 @@ fun MatchDetailsScreen(
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
           }
+        }
+      }
+    )
+  }
+
+  // Admin Delete Match Confirmation Dialog
+  if (showDeleteMatchDialog && currentMatch != null) {
+    AlertDialog(
+      onDismissRequest = { showDeleteMatchDialog = false },
+      icon = {
+        Icon(
+          imageVector = Icons.Default.Delete,
+          contentDescription = "Delete",
+          tint = AlertRed,
+          modifier = Modifier.size(28.dp)
+        )
+      },
+      title = { Text("Delete Tournament Match?", fontWeight = FontWeight.Bold) },
+      text = {
+        Text("Are you sure you want to delete '${currentMatch.name}'? All candidate registrations, broadcast credentials, and match details will be permanently removed. This action cannot be undone.")
+      },
+      confirmButton = {
+        Button(
+          onClick = {
+            viewModel.deleteTournamentMatch(currentMatch.id)
+            showDeleteMatchDialog = false
+            onBackClick()
+          },
+          colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error),
+          modifier = Modifier.testTag("confirm_delete_match_details_button")
+        ) {
+          Text("Delete Match", color = Color.White)
+        }
+      },
+      dismissButton = {
+        TextButton(onClick = { showDeleteMatchDialog = false }) {
+          Text("Cancel")
         }
       }
     )

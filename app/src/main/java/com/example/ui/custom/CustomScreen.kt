@@ -98,6 +98,7 @@ import com.google.firebase.auth.FirebaseAuth
 import com.example.data.model.CustomTournament
 import com.example.data.model.CustomProfile
 import com.example.data.model.CustomProfileApplication
+import com.example.data.model.formatMatchDisplayDate
 import com.example.ui.components.AppHeader
 import com.example.ui.components.AppSearchBar
 import com.example.ui.theme.AlertRed
@@ -113,14 +114,17 @@ fun isProfileExpired(day: String, time: String): Boolean {
     val currentYear = currentCal.get(java.util.Calendar.YEAR)
     
     try {
-        val resolvedDay = when (day.trim().lowercase()) {
-            "today" -> java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(currentCal.time)
-            "tomorrow" -> {
+        val trimmed = day.trim()
+        val resolvedDay = when {
+            trimmed.startsWith("Today, ", ignoreCase = true) -> trimmed.substringAfter("Today, ").trim()
+            trimmed.startsWith("Tomorrow, ", ignoreCase = true) -> trimmed.substringAfter("Tomorrow, ").trim()
+            trimmed.equals("today", ignoreCase = true) -> java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(currentCal.time)
+            trimmed.equals("tomorrow", ignoreCase = true) -> {
                 val cal = java.util.Calendar.getInstance()
                 cal.add(java.util.Calendar.DAY_OF_YEAR, 1)
                 java.text.SimpleDateFormat("d MMM", java.util.Locale.US).format(cal.time)
             }
-            else -> day
+            else -> trimmed
         }
         val date = format.parse("$resolvedDay $time")
         if (date != null) {
@@ -713,7 +717,7 @@ fun CustomScreen(
           onDelete = { appId -> viewModel.deleteCustomProfileApplication(appId) },
           onSendCandidateCredentials = { appId, rId, rPass -> viewModel.sendCandidateCredentials(appId, rId, rPass) },
           onHostPay = { appId -> viewModel.updateHostPayment(appId, true) },
-          onSubmitResult = { appId, sUri, wName, wUid -> viewModel.submitMatchResult(appId, sUri, wName, wUid) },
+          onSubmitResult = { appId, sUri, wName, wUid -> viewModel.submitMatchResult(appId, sUri, wName, wUid, "Host") },
           onSubmitReport = { appId, rReasons, rDesc, mUri -> viewModel.submitMatchReport(appId, rReasons, rDesc, mUri) }
       )
   }
@@ -1404,21 +1408,7 @@ fun CustomProfileCard(
   onAdminViewResultsAndReports: (() -> Unit)? = null,
   modifier: Modifier = Modifier
 ) {
-  val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
-  
-  val todayCal = java.util.Calendar.getInstance()
-  val todayString = dateFormat.format(todayCal.time)
-  
-  todayCal.add(java.util.Calendar.DAY_OF_YEAR, 1)
-  val tomorrowString = dateFormat.format(todayCal.time)
-
-  val dayDisplay = when {
-      profile.day == "Today" -> todayString
-      profile.day == "Tomorrow" -> tomorrowString
-      profile.day.startsWith("Today, ") -> profile.day.removePrefix("Today, ")
-      profile.day.startsWith("Tomorrow, ") -> profile.day.removePrefix("Tomorrow, ")
-      else -> profile.day
-  }
+  val dayDisplay = formatMatchDisplayDate(profile.day).ifBlank { profile.day }
   
   val timeDisplay = profile.time.ifBlank { "TBA" }
 
@@ -1854,14 +1844,14 @@ fun CustomProfileCard(
                   Spacer(modifier = Modifier.width(6.dp))
                   Column(horizontalAlignment = Alignment.Start) {
                       Text(
-                          text = "Result & Report",
+                          text = "Match Results",
                           style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
                           maxLines = 1
                       )
                       val statusText = when {
                           hasSubmittedReport -> "Dispute Report!"
-                          hasSubmittedResult -> "Photo Proof"
-                          else -> "No Submissions"
+                          hasSubmittedResult -> "Results Ready"
+                          else -> "Host & Candidate"
                       }
                       Text(
                           text = statusText,
@@ -2039,7 +2029,7 @@ fun MatchDetailsDialog(
                MatchDetailRow("Mode", profile.mode)
                MatchDetailRow(if (profile.gun == "Lone Wolf") "Game" else "Gun Rules", profile.gun.ifBlank { "Any" })
                MatchDetailRow("Level Required", "Min ${profile.level}")
-               MatchDetailRow("Schedule", "${profile.day} at ${profile.time}")
+               MatchDetailRow("Schedule", "${formatMatchDisplayDate(profile.day).ifBlank { profile.day }} at ${profile.time}")
             }
           }
 

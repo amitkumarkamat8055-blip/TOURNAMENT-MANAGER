@@ -60,6 +60,27 @@ fun MatchItem.getEffectivePerKill(): Int {
   }
 }
 
+fun formatMatchDisplayDate(dateStr: String): String {
+  val trimmed = dateStr.trim()
+  if (trimmed.isEmpty()) return ""
+  val dateFormat = java.text.SimpleDateFormat("d MMM", java.util.Locale.getDefault())
+  val todayCal = java.util.Calendar.getInstance()
+  val todayStr = dateFormat.format(todayCal.time)
+  val tomCal = java.util.Calendar.getInstance()
+  tomCal.add(java.util.Calendar.DAY_OF_YEAR, 1)
+  val tomStr = dateFormat.format(tomCal.time)
+
+  return when {
+    trimmed.equals("Today", ignoreCase = true) || trimmed.equals(todayStr, ignoreCase = true) -> "Today, $todayStr"
+    trimmed.equals("Tomorrow", ignoreCase = true) || trimmed.equals(tomStr, ignoreCase = true) -> "Tomorrow, $tomStr"
+    trimmed.startsWith("Today, ", ignoreCase = true) || trimmed.startsWith("Tomorrow, ", ignoreCase = true) -> trimmed
+    else -> trimmed
+  }
+}
+
+val MatchItem.displayDate: String
+  get() = formatMatchDisplayDate(date)
+
 data class CustomTournament(
   val id: Long = 0,
   val itemNumber: Int = 1,
@@ -159,6 +180,9 @@ data class CustomProfile(
   val createdAt: Long = 0L
 )
 
+val CustomProfile.displayDay: String
+  get() = formatMatchDisplayDate(day).ifBlank { day }
+
 data class CustomProfileApplication(
   val id: String = "",
   val profileId: String = "",
@@ -182,6 +206,14 @@ data class CustomProfileApplication(
   val winnerUid: String = "",
   val isResultSubmitted: Boolean = false,
   val resultSubmittedBy: String = "",
+  val hostResultScreenshot: String = "",
+  val hostWinnerName: String = "",
+  val hostWinnerUid: String = "",
+  val isHostResultSubmitted: Boolean = false,
+  val candidateResultScreenshot: String = "",
+  val candidateWinnerName: String = "",
+  val candidateWinnerUid: String = "",
+  val isCandidateResultSubmitted: Boolean = false,
   val reportReason: String = "",
   val reportDescription: String = "",
   val reportMediaUrl: String = "",

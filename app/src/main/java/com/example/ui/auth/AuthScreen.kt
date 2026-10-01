@@ -134,13 +134,71 @@ fun AuthScreen(
             Spacer(modifier = Modifier.height(8.dp))
             
             Text(
-                text = if (isLogin) "Sign in to continue" else "Join Tournament Arena",
+                text = if (isLogin) "Old users sign in to continue" else "New users register to join arena",
                 color = SubtitleText,
-                fontSize = 16.sp,
+                fontSize = 15.sp,
                 fontWeight = FontWeight.Normal
             )
 
-            Spacer(modifier = Modifier.height(32.dp))
+            Spacer(modifier = Modifier.height(24.dp))
+
+            // Tab Selector: Login vs Create Account
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = CardBackground,
+                border = BorderStroke(1.dp, Color(0xFF2A2A38)),
+                modifier = Modifier.fillMaxWidth().height(48.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxSize().padding(4.dp),
+                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (isLogin) GamingGreen else Color.Transparent)
+                            .clickable {
+                                isLogin = true
+                                viewModel.clearAuthError()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Login",
+                            color = if (isLogin) DarkBackground else LightText,
+                            fontWeight = if (isLogin) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 15.sp
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(4.dp))
+
+                    Box(
+                        modifier = Modifier
+                            .weight(1f)
+                            .fillMaxSize()
+                            .clip(RoundedCornerShape(10.dp))
+                            .background(if (!isLogin) GamingGreen else Color.Transparent)
+                            .clickable {
+                                isLogin = false
+                                viewModel.clearAuthError()
+                            },
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Text(
+                            text = "Create Account",
+                            color = if (!isLogin) DarkBackground else LightText,
+                            fontWeight = if (!isLogin) FontWeight.Bold else FontWeight.Medium,
+                            fontSize = 15.sp
+                        )
+                    }
+                }
+            }
+
+            Spacer(modifier = Modifier.height(20.dp))
 
             // Auth Form Card
             Card(

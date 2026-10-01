@@ -46,9 +46,9 @@ sealed class UiEvent {
   data class NavigateToMatchDetails(val matchId: Long) : UiEvent()
 }
 
-class TournamentViewModel(application: Application) : AndroidViewModel(application) {
+class TournamentViewModel(private val app: Application) : AndroidViewModel(app) {
 
-  private val database: AppDatabase = AppDatabase.getDatabase(application, viewModelScope)
+  private val database: AppDatabase = AppDatabase.getDatabase(app, viewModelScope)
   private val repository: TournamentRepository
 
   init {
@@ -67,15 +67,25 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     viewModelScope.launch(Dispatchers.IO) {
       try {
         repository.ensureAdminAccount()
-        val auth = try { FirebaseAuth.getInstance() } catch (e: Exception) { null }
-        if (auth != null && auth.currentUser == null) {
-          try {
-            auth.signInAnonymously().await()
-          } catch (_: Exception) {}
-        }
-        val currentAuthUid = auth?.currentUser?.uid ?: ""
-        if (currentAuthUid.isNotBlank()) {
-          repository.syncSessionForFirebaseUser(currentAuthUid)
+        val prefs = app.getSharedPreferences("app_auth_state", android.content.Context.MODE_PRIVATE)
+        val hasUserEverLoggedIn = prefs.getBoolean("has_user_logged_in", false)
+        val currentSession = database.activeSessionDao().getActiveSession()
+        if (!hasUserEverLoggedIn || currentSession == null || !currentSession.isLoggedIn || currentSession.activeAccountId <= 0L) {
+          database.activeSessionDao().setActiveSession(
+            com.example.data.local.entity.ActiveSessionEntity(
+              id = 1,
+              activeAccountId = 0L,
+              isLoggedIn = false,
+              isGuest = false,
+              lastLoginTime = 0L
+            )
+          )
+        } else {
+          val auth = try { FirebaseAuth.getInstance() } catch (e: Exception) { null }
+          val currentAuthUid = auth?.currentUser?.uid ?: ""
+          if (currentAuthUid.isNotBlank()) {
+            repository.syncSessionForFirebaseUser(currentAuthUid)
+          }
         }
       } catch (e: Exception) {
         android.util.Log.e("TournamentViewModel", "Session sync error: ${e.message}")
@@ -511,11 +521,6 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     listenToCustomProfileApplications()
     viewModelScope.launch(Dispatchers.IO) {
       try {
-        if (FirebaseAuth.getInstance().currentUser == null) {
-          try {
-            FirebaseAuth.getInstance().signInAnonymously().await()
-          } catch (_: Exception) {}
-        }
         val db = FirebaseFirestore.getInstance()
         val fakeIds = listOf("room_ff_1v1_headshot", "room_cs_4v4_war", "room_br_solo_bermuda", "room_br_squad_kalahari")
         for (fId in fakeIds) {
@@ -563,11 +568,6 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     // Also run an immediate one-shot get so candidates are instantly available
     viewModelScope.launch(Dispatchers.IO) {
       try {
-        if (FirebaseAuth.getInstance().currentUser == null) {
-          try {
-            FirebaseAuth.getInstance().signInAnonymously().await()
-          } catch (_: Exception) {}
-        }
         val snap = FirebaseFirestore.getInstance().collection("custom_profile_applications").get().await()
         val apps = snap.documents.mapNotNull { doc ->
           val data = doc.data ?: return@mapNotNull null
@@ -594,6 +594,14 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
             winnerUid = data["winnerUid"] as? String ?: "",
             isResultSubmitted = data["isResultSubmitted"] as? Boolean ?: false,
             resultSubmittedBy = data["resultSubmittedBy"] as? String ?: "",
+            hostResultScreenshot = (data["hostResultScreenshot"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["resultScreenshot"] as? String ?: "" else ""),
+            hostWinnerName = (data["hostWinnerName"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerName"] as? String ?: "" else ""),
+            hostWinnerUid = (data["hostWinnerUid"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerUid"] as? String ?: "" else ""),
+            isHostResultSubmitted = (data["isHostResultSubmitted"] as? Boolean) ?: ((data["isResultSubmitted"] as? Boolean ?: false) && (data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)),
+            candidateResultScreenshot = (data["candidateResultScreenshot"] as? String)?.takeIf { it.isNotBlank() } ?: (if (!(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["resultScreenshot"] as? String ?: "" else ""),
+            candidateWinnerName = (data["candidateWinnerName"] as? String)?.takeIf { it.isNotBlank() } ?: (if (!(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerName"] as? String ?: "" else ""),
+            candidateWinnerUid = (data["candidateWinnerUid"] as? String)?.takeIf { it.isNotBlank() } ?: (if (!(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerUid"] as? String ?: "" else ""),
+            isCandidateResultSubmitted = (data["isCandidateResultSubmitted"] as? Boolean) ?: ((data["isResultSubmitted"] as? Boolean ?: false) && !(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)),
             reportReason = data["reportReason"] as? String ?: "",
             reportDescription = data["reportDescription"] as? String ?: "",
             reportMediaUrl = data["reportMediaUrl"] as? String ?: "",
@@ -651,6 +659,14 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
                 winnerUid = data["winnerUid"] as? String ?: "",
                 isResultSubmitted = data["isResultSubmitted"] as? Boolean ?: false,
                 resultSubmittedBy = data["resultSubmittedBy"] as? String ?: "",
+                hostResultScreenshot = (data["hostResultScreenshot"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["resultScreenshot"] as? String ?: "" else ""),
+                hostWinnerName = (data["hostWinnerName"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerName"] as? String ?: "" else ""),
+                hostWinnerUid = (data["hostWinnerUid"] as? String)?.takeIf { it.isNotBlank() } ?: (if ((data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerUid"] as? String ?: "" else ""),
+                isHostResultSubmitted = (data["isHostResultSubmitted"] as? Boolean) ?: ((data["isResultSubmitted"] as? Boolean ?: false) && (data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)),
+                candidateResultScreenshot = (data["candidateResultScreenshot"] as? String)?.takeIf { it.isNotBlank() } ?: (if (!(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["resultScreenshot"] as? String ?: "" else ""),
+                candidateWinnerName = (data["candidateWinnerName"] as? String)?.takeIf { it.isNotBlank() } ?: (if (!(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerName"] as? String ?: "" else ""),
+                candidateWinnerUid = (data["candidateWinnerUid"] as? String)?.takeIf { it.isNotBlank() } ?: (if (!(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)) data["winnerUid"] as? String ?: "" else ""),
+                isCandidateResultSubmitted = (data["isCandidateResultSubmitted"] as? Boolean) ?: ((data["isResultSubmitted"] as? Boolean ?: false) && !(data["resultSubmittedBy"] as? String ?: "").equals("Host", ignoreCase = true)),
                 reportReason = data["reportReason"] as? String ?: "",
                 reportDescription = data["reportDescription"] as? String ?: "",
                 reportMediaUrl = data["reportMediaUrl"] as? String ?: "",
@@ -769,22 +785,22 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
   )
 
   val isAdmin = authStatus.map { status ->
-    val currentAuthUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
-    if (currentAuthUid == AdminConfig.NON_ADMIN_UID || AdminConfig.NON_ADMIN_UIDS.contains(currentAuthUid)) {
+    if (status !is AuthStatus.LoggedIn || status.isGuest) {
       false
-    } else if (status is AuthStatus.LoggedIn && !status.isGuest) {
-      val account = status.account
-      AdminConfig.isUserAdmin(
-        firebaseUid = currentAuthUid,
-        accountPhone = account.phone,
-        accountGameUid = account.gameUid,
-        accountUsername = account.username,
-        accountId = account.id
-      )
-    } else if (currentAuthUid == AdminConfig.ADMIN_UID || AdminConfig.ADMIN_UIDS.contains(currentAuthUid)) {
-      true
     } else {
-      false
+      val account = status.account
+      val currentAuthUid = FirebaseAuth.getInstance().currentUser?.uid ?: ""
+      if (currentAuthUid == AdminConfig.NON_ADMIN_UID || AdminConfig.NON_ADMIN_UIDS.contains(currentAuthUid)) {
+        false
+      } else {
+        AdminConfig.isUserAdmin(
+          firebaseUid = currentAuthUid,
+          accountPhone = account.phone,
+          accountGameUid = account.gameUid,
+          accountUsername = account.username,
+          accountId = account.id
+        )
+      }
     }
   }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), false)
 
@@ -856,11 +872,6 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
   fun listenToMatchRegistrations() {
     viewModelScope.launch(Dispatchers.IO) {
       try {
-        if (FirebaseAuth.getInstance().currentUser == null) {
-          try {
-            FirebaseAuth.getInstance().signInAnonymously().await()
-          } catch (_: Exception) {}
-        }
         val snap = FirebaseFirestore.getInstance().collection("match_registrations").get().await()
         val remoteList = snap.documents.mapNotNull { doc ->
           val data = doc.data ?: return@mapNotNull null
@@ -1125,19 +1136,31 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
             android.util.Log.e("FirebaseStorage", "Failed to upload result image", e)
           }
         }
+        val isHost = submittedBy.equals("Host", ignoreCase = true)
         val updateMap = hashMapOf<String, Any>(
           "resultScreenshot" to finalUrl,
           "winnerName" to winnerName,
           "winnerUid" to winnerUid,
-          "resultSubmittedBy" to submittedBy,
+          "resultSubmittedBy" to (if (isHost) "Host" else "Candidate"),
           "isResultSubmitted" to true,
-          "status" to "Result Submitted"
+          "status" to (if (isHost) "Host Result Submitted" else "Candidate Result Submitted")
         )
+        if (isHost) {
+          updateMap["hostResultScreenshot"] = finalUrl
+          updateMap["hostWinnerName"] = winnerName
+          updateMap["hostWinnerUid"] = winnerUid
+          updateMap["isHostResultSubmitted"] = true
+        } else {
+          updateMap["candidateResultScreenshot"] = finalUrl
+          updateMap["candidateWinnerName"] = winnerName
+          updateMap["candidateWinnerUid"] = winnerUid
+          updateMap["isCandidateResultSubmitted"] = true
+        }
         FirebaseFirestore.getInstance().collection("custom_profile_applications")
           .document(applicationId)
           .update(updateMap)
           .await()
-        _uiEvents.emit(UiEvent.ShowSnackbar("Match result screenshot submitted successfully!"))
+        _uiEvents.emit(UiEvent.ShowSnackbar(if (isHost) "Host match result submitted successfully!" else "Candidate match result submitted successfully!"))
         onComplete()
       } catch (e: Exception) {
         android.util.Log.e("ViewModel", "Submit result error", e)
@@ -1237,6 +1260,36 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
     }
   }
 
+  fun refundCustomRoomEntryFee(
+    application: com.example.data.model.CustomProfileApplication,
+    targetUid: String,
+    amount: Int,
+    reason: String = "Entry Fee Refund",
+    onSuccess: () -> Unit = {}
+  ) {
+    viewModelScope.launch {
+      try {
+        val updateMap = hashMapOf<String, Any>(
+          "status" to "Refunded (₹$amount)",
+          "isReported" to false
+        )
+        FirebaseFirestore.getInstance().collection("custom_profile_applications")
+          .document(application.id)
+          .update(updateMap)
+          .await()
+
+        repository.creditWinningAmountToUser(targetUid, amount)
+        _uiEvents.emit(UiEvent.ShowSnackbar("₹$amount refunded to UID: $targetUid ($reason)"))
+        onSuccess()
+      } catch (e: Exception) {
+        android.util.Log.e("AdminError", "Failed to process refund", e)
+        repository.creditWinningAmountToUser(targetUid, amount)
+        _uiEvents.emit(UiEvent.ShowSnackbar("Refund of ₹$amount credited to player wallet!"))
+        onSuccess()
+      }
+    }
+  }
+
   val allAccounts: StateFlow<List<UserAccount>> = repository.allAccounts.stateIn(
     scope = viewModelScope,
     started = SharingStarted.WhileSubscribed(5000),
@@ -1271,6 +1324,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
       val result = repository.login(identifier, pass)
       _isAuthLoading.value = false
       result.onSuccess { account ->
+        val prefs = app.getSharedPreferences("app_auth_state", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("has_user_logged_in", true).apply()
         _uiEvents.emit(UiEvent.ShowSnackbar("Welcome back, ${account.name}!"))
         onSuccess()
       }.onFailure { ex ->
@@ -1305,6 +1360,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
       )
       _isAuthLoading.value = false
       result.onSuccess { account ->
+        val prefs = app.getSharedPreferences("app_auth_state", android.content.Context.MODE_PRIVATE)
+        prefs.edit().putBoolean("has_user_logged_in", true).apply()
         _uiEvents.emit(UiEvent.ShowSnackbar("Account created! Welcome, ${account.name} (Bonus ₹100 added)"))
         refreshWalletTransactions()
         onSuccess()
@@ -1352,6 +1409,8 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
 
   fun logout() {
     viewModelScope.launch {
+      val prefs = app.getSharedPreferences("app_auth_state", android.content.Context.MODE_PRIVATE)
+      prefs.edit().putBoolean("has_user_logged_in", false).apply()
       repository.logout()
       _uiEvents.emit(UiEvent.ShowSnackbar("You have been logged out."))
     }
@@ -2092,21 +2151,45 @@ class TournamentViewModel(application: Application) : AndroidViewModel(applicati
   fun updateProfile(
     name: String,
     uid: String,
-    region: String,
-    bio: String,
-    avatarId: Int,
+    level: String = "",
+    region: String = "",
+    bio: String = "",
+    avatarId: Int = 0,
     onSuccess: () -> Unit
   ) {
     viewModelScope.launch {
       val current = userProfile.value
+      val finalRank = if (level.isNotBlank()) level.trim() else current.rank
       val updated = current.copy(
         name = name.trim(),
         uid = uid.trim(),
+        rank = finalRank,
         region = region.trim(),
         bio = bio.trim(),
         avatarId = avatarId
       )
       repository.updateUserProfile(updated)
+      
+      // Update Firestore user document if logged in
+      val currentAuthUid = try {
+        com.google.firebase.auth.FirebaseAuth.getInstance().currentUser?.uid
+      } catch (_: Exception) { null }
+      if (!currentAuthUid.isNullOrBlank()) {
+        try {
+          val updateMap: Map<String, Any> = mapOf(
+            "fullName" to name.trim(),
+            "name" to name.trim(),
+            "gameUid" to uid.trim(),
+            "uid" to uid.trim(),
+            "level" to finalRank,
+            "rank" to finalRank
+          )
+          FirebaseFirestore.getInstance().collection("users").document(currentAuthUid).update(updateMap).await()
+        } catch (e: Exception) {
+          android.util.Log.w("TournamentViewModel", "Error updating firestore user profile: ${e.message}")
+        }
+      }
+
       _uiEvents.emit(UiEvent.ShowSnackbar("Profile updated successfully!"))
       onSuccess()
     }

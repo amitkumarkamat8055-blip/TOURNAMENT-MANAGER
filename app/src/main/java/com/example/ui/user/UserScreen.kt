@@ -133,6 +133,7 @@ import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.data.model.AuthStatus
 import com.example.data.model.MatchItem
+import com.example.data.model.displayDate
 import com.example.data.model.TournamentHistory
 import com.example.data.model.CustomProfileApplication
 import com.example.ui.theme.ElectricIndigo
@@ -203,6 +204,7 @@ fun UserScreen(
   var appForPayment by remember { mutableStateOf<CustomProfileApplication?>(null) }
   var appForHostPayment by remember { mutableStateOf<CustomProfileApplication?>(null) }
   var appForSubmit by remember { mutableStateOf<CustomProfileApplication?>(null) }
+  var isSubmittingAsHost by remember { mutableStateOf(false) }
   var appForReport by remember { mutableStateOf<CustomProfileApplication?>(null) }
   var appForSend by remember { mutableStateOf<CustomProfileApplication?>(null) }
   var appToAccept by remember { mutableStateOf<CustomProfileApplication?>(null) }
@@ -329,20 +331,21 @@ fun UserScreen(
     ),
     verticalArrangement = Arrangement.spacedBy(16.dp)
   ) {
-    // 1. Profile Header Card
+    // 1. Profile Header Card (Sleek Compact Format)
     item {
       Card(
-        shape = RoundedCornerShape(24.dp),
+        shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.4f)),
-        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.25f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
         modifier = Modifier.fillMaxWidth()
       ) {
         Column(
           modifier = Modifier
             .fillMaxWidth()
-            .padding(18.dp)
+            .padding(14.dp)
         ) {
+          // Top Row: Avatar Logo, Name, UID + Level, Edit Button
           Row(
             modifier = Modifier.fillMaxWidth(),
             horizontalArrangement = Arrangement.SpaceBetween,
@@ -352,99 +355,87 @@ fun UserScreen(
               verticalAlignment = Alignment.CenterVertically,
               modifier = Modifier.weight(1f)
             ) {
-              // Avatar
+              // High-tier Gaming Avatar Logo
               Box(
                 modifier = Modifier
-                  .size(64.dp)
+                  .size(50.dp)
                   .clip(CircleShape)
                   .background(
-                    Brush.radialGradient(
-                      listOf(MaterialTheme.colorScheme.primary, MaterialTheme.colorScheme.secondary)
+                    Brush.linearGradient(
+                      listOf(
+                        MaterialTheme.colorScheme.primary,
+                        SuccessGreen.copy(alpha = 0.8f)
+                      )
                     )
-                  ),
+                  )
+                  .border(2.dp, SuccessGreen.copy(alpha = 0.6f), CircleShape),
                 contentAlignment = Alignment.Center
               ) {
                 Icon(
-                  imageVector = Icons.Default.SportsEsports,
+                  imageVector = Icons.Default.MilitaryTech,
                   contentDescription = "User Avatar",
                   tint = Color.White,
-                  modifier = Modifier.size(36.dp)
+                  modifier = Modifier.size(30.dp)
                 )
               }
 
-              Spacer(modifier = Modifier.width(14.dp))
+              Spacer(modifier = Modifier.width(12.dp))
 
-              Column {
+              Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                // Player Name
                 Text(
                   text = userProfile.name,
-                  style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
-                  color = MaterialTheme.colorScheme.onSurface
+                  style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                  color = MaterialTheme.colorScheme.onSurface,
+                  maxLines = 1,
+                  overflow = TextOverflow.Ellipsis
                 )
 
-                // UID with Copy Button
+                // UID with Copy and Level Badge (No Region)
                 Row(
-                  verticalAlignment = Alignment.CenterVertically,
-                  modifier = Modifier
-                    .clickable {
-                      copyToClipboard(context, "Player UID", userProfile.uid)
-                    }
-                    .testTag("copy_uid_button")
-                ) {
-                  Text(
-                    text = "UID: ${userProfile.uid}",
-                    style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                  )
-                  Spacer(modifier = Modifier.width(4.dp))
-                  Icon(
-                    imageVector = Icons.Default.ContentCopy,
-                    contentDescription = "Copy UID",
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(12.dp)
-                  )
-                }
-
-                // Region & Rank Tag
-                Row(
-                  modifier = Modifier.padding(top = 4.dp),
                   verticalAlignment = Alignment.CenterVertically,
                   horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
-                  Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = MaterialTheme.colorScheme.surfaceVariant
-                  ) {
-                    Row(
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp),
-                      verticalAlignment = Alignment.CenterVertically
-                    ) {
-                      Icon(
-                        imageVector = Icons.Default.Public,
-                        contentDescription = null,
-                        tint = NeonCyan,
-                        modifier = Modifier.size(11.dp)
-                      )
-                      Spacer(modifier = Modifier.width(3.dp))
-                      Text(
-                        text = userProfile.region,
-                        style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
-                      )
-                    }
-                  }
-
-                  Surface(
-                    shape = RoundedCornerShape(6.dp),
-                    color = TrophyGold.copy(alpha = 0.15f)
+                  Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                      .clickable {
+                        copyToClipboard(context, "Player UID", userProfile.uid)
+                      }
+                      .testTag("copy_uid_button")
                   ) {
                     Text(
-                      text = userProfile.rank,
+                      text = "UID: ${userProfile.uid}",
+                      style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold),
+                      color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Spacer(modifier = Modifier.width(3.dp))
+                    Icon(
+                      imageVector = Icons.Default.ContentCopy,
+                      contentDescription = "Copy UID",
+                      tint = MaterialTheme.colorScheme.primary,
+                      modifier = Modifier.size(12.dp)
+                    )
+                  }
+
+                  Text(
+                    text = "•",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.outline
+                  )
+
+                  Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = TrophyGold.copy(alpha = 0.18f)
+                  ) {
+                    Text(
+                      text = if (userProfile.rank.startsWith("Level", ignoreCase = true)) userProfile.rank else "LV: ${userProfile.rank}",
                       style = MaterialTheme.typography.labelSmall.copy(
                         fontWeight = FontWeight.Bold,
-                        fontSize = 10.sp,
+                        fontSize = 11.sp,
                         color = TrophyGold
                       ),
-                      modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                      modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
                     )
                   }
                 }
@@ -455,48 +446,42 @@ fun UserScreen(
             IconButton(
               onClick = { showEditDialog = true },
               modifier = Modifier
-                .size(40.dp)
+                .size(36.dp)
                 .clip(CircleShape)
-                .background(MaterialTheme.colorScheme.surfaceVariant)
+                .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f))
                 .testTag("edit_profile_button")
             ) {
               Icon(
                 imageVector = Icons.Default.Edit,
                 contentDescription = "Edit Profile",
                 tint = MaterialTheme.colorScheme.primary,
-                modifier = Modifier.size(18.dp)
+                modifier = Modifier.size(16.dp)
               )
             }
           }
 
-          // Registered Contact Info: Only show what was filled during account creation (mobile only, email only, or both)
+          // Registered Contact Info (Only what was used when creating profile)
           if (registeredEmail.isNotBlank() || registeredPhone.isNotBlank()) {
-            Spacer(modifier = Modifier.height(14.dp))
-            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f))
-            Spacer(modifier = Modifier.height(12.dp))
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
+            Spacer(modifier = Modifier.height(8.dp))
 
             Column(
               modifier = Modifier.fillMaxWidth(),
-              verticalArrangement = Arrangement.spacedBy(8.dp)
+              verticalArrangement = Arrangement.spacedBy(6.dp)
             ) {
-              Text(
-                text = "REGISTERED PROFILE INFO",
-                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold, letterSpacing = 1.sp),
-                color = MaterialTheme.colorScheme.primary
-              )
-
               // Only show email if provided during account creation
               if (registeredEmail.isNotBlank()) {
                 Surface(
-                  shape = RoundedCornerShape(12.dp),
-                  color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                  border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                  shape = RoundedCornerShape(8.dp),
+                  color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                  border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                   modifier = Modifier.fillMaxWidth().testTag("profile_registered_email_card")
                 ) {
                   Row(
                     modifier = Modifier
                       .fillMaxWidth()
-                      .padding(horizontal = 12.dp, vertical = 8.dp),
+                      .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                   ) {
@@ -504,45 +489,30 @@ fun UserScreen(
                       verticalAlignment = Alignment.CenterVertically,
                       modifier = Modifier.weight(1f)
                     ) {
-                      Box(
-                        modifier = Modifier
-                          .size(32.dp)
-                          .clip(CircleShape)
-                          .background(NeonCyan.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.AlternateEmail,
-                          contentDescription = "Registered Email",
-                          tint = NeonCyan,
-                          modifier = Modifier.size(16.dp)
-                        )
-                      }
-                      Spacer(modifier = Modifier.width(10.dp))
-                      Column {
-                        Text(
-                          text = "Registered Email",
-                          style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                          color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                          text = registeredEmail,
-                          style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                          color = MaterialTheme.colorScheme.onSurface,
-                          maxLines = 1,
-                          overflow = TextOverflow.Ellipsis
-                        )
-                      }
+                      Icon(
+                        imageVector = Icons.Default.AlternateEmail,
+                        contentDescription = "Email",
+                        tint = NeonCyan,
+                        modifier = Modifier.size(14.dp)
+                      )
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text(
+                        text = registeredEmail,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                      )
                     }
                     IconButton(
                       onClick = { copyToClipboard(context, "Registered Email", registeredEmail) },
-                      modifier = Modifier.size(32.dp).testTag("copy_registered_email_button")
+                      modifier = Modifier.size(24.dp).testTag("copy_registered_email_button")
                     ) {
                       Icon(
                         imageVector = Icons.Default.ContentCopy,
                         contentDescription = "Copy Email",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(12.dp)
                       )
                     }
                   }
@@ -552,15 +522,15 @@ fun UserScreen(
               // Only show mobile number if provided during account creation
               if (registeredPhone.isNotBlank()) {
                 Surface(
-                  shape = RoundedCornerShape(12.dp),
-                  color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                  border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.3f)),
+                  shape = RoundedCornerShape(8.dp),
+                  color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                  border = BorderStroke(0.5.dp, MaterialTheme.colorScheme.outline.copy(alpha = 0.2f)),
                   modifier = Modifier.fillMaxWidth().testTag("profile_registered_phone_card")
                 ) {
                   Row(
                     modifier = Modifier
                       .fillMaxWidth()
-                      .padding(horizontal = 12.dp, vertical = 8.dp),
+                      .padding(horizontal = 10.dp, vertical = 6.dp),
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.SpaceBetween
                   ) {
@@ -568,43 +538,28 @@ fun UserScreen(
                       verticalAlignment = Alignment.CenterVertically,
                       modifier = Modifier.weight(1f)
                     ) {
-                      Box(
-                        modifier = Modifier
-                          .size(32.dp)
-                          .clip(CircleShape)
-                          .background(SuccessGreen.copy(alpha = 0.15f)),
-                        contentAlignment = Alignment.Center
-                      ) {
-                        Icon(
-                          imageVector = Icons.Default.Phone,
-                          contentDescription = "Registered Mobile",
-                          tint = SuccessGreen,
-                          modifier = Modifier.size(16.dp)
-                        )
-                      }
-                      Spacer(modifier = Modifier.width(10.dp))
-                      Column {
-                        Text(
-                          text = "Registered Mobile Number",
-                          style = MaterialTheme.typography.labelSmall.copy(fontSize = 10.sp),
-                          color = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                        Text(
-                          text = registeredPhone,
-                          style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold),
-                          color = MaterialTheme.colorScheme.onSurface
-                        )
-                      }
+                      Icon(
+                        imageVector = Icons.Default.Phone,
+                        contentDescription = "Mobile",
+                        tint = SuccessGreen,
+                        modifier = Modifier.size(14.dp)
+                      )
+                      Spacer(modifier = Modifier.width(6.dp))
+                      Text(
+                        text = registeredPhone,
+                        style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
+                        color = MaterialTheme.colorScheme.onSurface
+                      )
                     }
                     IconButton(
                       onClick = { copyToClipboard(context, "Registered Mobile", registeredPhone) },
-                      modifier = Modifier.size(32.dp).testTag("copy_registered_mobile_button")
+                      modifier = Modifier.size(24.dp).testTag("copy_registered_mobile_button")
                     ) {
                       Icon(
                         imageVector = Icons.Default.ContentCopy,
                         contentDescription = "Copy Mobile",
                         tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(14.dp)
+                        modifier = Modifier.size(12.dp)
                       )
                     }
                   }
@@ -613,10 +568,10 @@ fun UserScreen(
             }
           }
 
-          // Session Management Row inside Profile Card
-          Spacer(modifier = Modifier.height(14.dp))
-          HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.15f))
-          Spacer(modifier = Modifier.height(10.dp))
+          // Session Row inside Profile Card - NO switch button, only logout
+          Spacer(modifier = Modifier.height(8.dp))
+          HorizontalDivider(color = MaterialTheme.colorScheme.outline.copy(alpha = 0.12f))
+          Spacer(modifier = Modifier.height(6.dp))
 
           Row(
             modifier = Modifier.fillMaxWidth(),
@@ -624,33 +579,32 @@ fun UserScreen(
             verticalAlignment = Alignment.CenterVertically
           ) {
             Text(
-              text = if (isGuest) "Guest Session" else "@${activeAccount?.username ?: userProfile.name.lowercase()}",
+              text = if (isGuest) "Guest Session" else "@${activeAccount?.username ?: userProfile.name.lowercase().replace(" ", "_")}",
               style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium),
               color = MaterialTheme.colorScheme.onSurfaceVariant
             )
 
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-              if (isGuest) {
-                TextButton(
-                  onClick = onNavigateToAuth,
-                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                  Text("Register / Sign In", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
-                }
-              } else {
-                TextButton(
-                  onClick = { showSwitchAccountDialog = true },
-                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                  Text("Switch", style = MaterialTheme.typography.labelSmall)
-                }
-                TextButton(
-                  onClick = { showLogoutConfirmDialog = true },
-                  colors = ButtonDefaults.textButtonColors(contentColor = MaterialTheme.colorScheme.error),
-                  contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
-                ) {
-                  Text("Log Out", style = MaterialTheme.typography.labelSmall)
-                }
+            if (isGuest) {
+              TextButton(
+                onClick = onNavigateToAuth,
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+              ) {
+                Text("Register / Sign In", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
+              }
+            } else {
+              TextButton(
+                onClick = { showLogoutConfirmDialog = true },
+                colors = ButtonDefaults.textButtonColors(contentColor = AlertRed),
+                contentPadding = PaddingValues(horizontal = 8.dp, vertical = 2.dp)
+              ) {
+                Icon(
+                  imageVector = Icons.Default.ExitToApp,
+                  contentDescription = null,
+                  modifier = Modifier.size(14.dp),
+                  tint = AlertRed
+                )
+                Spacer(modifier = Modifier.width(4.dp))
+                Text("Log Out", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold))
               }
             }
           }
@@ -658,12 +612,12 @@ fun UserScreen(
       }
     }
 
-    // 2. My Wallet Quick Access Tile (replacing full tournament wallet interface)
+    // 2. My Wallet Quick Access Tile (Previous Clean Style)
     item {
       Card(
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        border = BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.35f)),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
         modifier = Modifier
           .fillMaxWidth()
@@ -683,25 +637,16 @@ fun UserScreen(
           ) {
             Box(
               modifier = Modifier
-                .size(48.dp)
-                .clip(CircleShape)
-                .background(
-                  Brush.linearGradient(
-                    listOf(
-                      MaterialTheme.colorScheme.primary,
-                      MaterialTheme.colorScheme.secondary
-                    )
-                  )
-                )
-                .clickable { onWalletClick() }
-                .testTag("my_wallet_icon_button"),
+                .size(46.dp)
+                .clip(RoundedCornerShape(12.dp))
+                .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
               contentAlignment = Alignment.Center
             ) {
               Icon(
                 imageVector = Icons.Default.AccountBalanceWallet,
                 contentDescription = "My Wallet",
-                tint = Color.White,
-                modifier = Modifier.size(26.dp)
+                tint = MaterialTheme.colorScheme.primary,
+                modifier = Modifier.size(24.dp)
               )
             }
 
@@ -710,46 +655,24 @@ fun UserScreen(
             Column {
               Text(
                 text = "My Wallet",
-                style = MaterialTheme.typography.titleMedium.copy(
-                  fontWeight = FontWeight.Bold,
-                  fontSize = 17.sp
-                ),
+                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                 color = MaterialTheme.colorScheme.onSurface
               )
+              Spacer(modifier = Modifier.height(2.dp))
               Text(
-                text = "Tap to view earnings, add funds & withdraw",
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = 12.sp),
+                text = "Available: ₹${userProfile.walletBalance}",
+                style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant
               )
             }
           }
 
-          Row(
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp)
-          ) {
-            Surface(
-              shape = RoundedCornerShape(10.dp),
-              color = MaterialTheme.colorScheme.primary.copy(alpha = 0.12f),
-              border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f))
-            ) {
-              Text(
-                text = "₹${userProfile.walletBalance}",
-                style = MaterialTheme.typography.titleMedium.copy(
-                  fontWeight = FontWeight.ExtraBold,
-                  color = MaterialTheme.colorScheme.primary
-                ),
-                modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
-              )
-            }
-
-            Icon(
-              imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
-              contentDescription = "Navigate to Wallet",
-              tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.6f),
-              modifier = Modifier.size(16.dp)
-            )
-          }
+          Icon(
+            imageVector = Icons.AutoMirrored.Filled.ArrowForwardIos,
+            contentDescription = "Open Wallet",
+            tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f),
+            modifier = Modifier.size(16.dp)
+          )
         }
       }
     }
@@ -1130,7 +1053,10 @@ fun UserScreen(
                         Spacer(modifier = Modifier.height(10.dp))
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                           Button(
-                            onClick = { appForSubmit = app },
+                            onClick = {
+                              isSubmittingAsHost = false
+                              appForSubmit = app
+                            },
                             modifier = Modifier.weight(1f),
                             colors = ButtonDefaults.buttonColors(containerColor = NeonCyan),
                             shape = RoundedCornerShape(8.dp)
@@ -1177,7 +1103,7 @@ fun UserScreen(
                       color = MaterialTheme.colorScheme.onSurface
                     )
                     Text(
-                      text = "Match #${match.matchNumber} • ${match.date} • ${match.time}",
+                      text = "Match #${match.matchNumber} • ${match.displayDate} • ${match.time}",
                       style = MaterialTheme.typography.labelSmall,
                       color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
@@ -1783,7 +1709,10 @@ fun UserScreen(
                                 Text("Send")
                               }
                               Button(
-                                onClick = { appForSubmit = app },
+                                onClick = {
+                                  isSubmittingAsHost = true
+                                  appForSubmit = app
+                                },
                                 modifier = Modifier.weight(1f),
                                 colors = ButtonDefaults.buttonColors(containerColor = NeonCyan)
                               ) {
@@ -1858,8 +1787,8 @@ fun UserScreen(
       accountEmail = registeredEmail,
       accountPhone = registeredPhone,
       onDismiss = { showEditDialog = false },
-      onSave = { name, uid, region, bio, avatarId ->
-        viewModel.updateProfile(name, uid, region, bio, avatarId) {
+      onSave = { name, uid, level, region, bio, avatarId ->
+        viewModel.updateProfile(name, uid, level, region, bio, avatarId) {
           showEditDialog = false
         }
       }
@@ -2038,7 +1967,13 @@ fun UserScreen(
           application = appForSubmit,
           onDismiss = { appForSubmit = null },
           onSubmit = { screenshotUri, winnerName, winnerUid ->
-              viewModel.submitMatchResult(appForSubmit!!.id, screenshotUri, winnerName, winnerUid)
+              viewModel.submitMatchResult(
+                  applicationId = appForSubmit!!.id,
+                  screenshotUri = screenshotUri,
+                  winnerName = winnerName,
+                  winnerUid = winnerUid,
+                  submittedBy = if (isSubmittingAsHost) "Host" else "Candidate"
+              )
               appForSubmit = null
           }
       )
@@ -2259,7 +2194,7 @@ fun EditProfileDialog(
   accountEmail: String = "",
   accountPhone: String = "",
   onDismiss: () -> Unit,
-  onSave: (name: String, uid: String, region: String, bio: String, avatarId: Int) -> Unit
+  onSave: (name: String, uid: String, level: String, region: String, bio: String, avatarId: Int) -> Unit
 ) {
   val keyboardController = androidx.compose.ui.platform.LocalSoftwareKeyboardController.current
   val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
@@ -2271,9 +2206,11 @@ fun EditProfileDialog(
 
   var name by remember { mutableStateOf(currentProfile.name) }
   var uid by remember { mutableStateOf(currentProfile.uid) }
+  var level by remember { mutableStateOf(currentProfile.rank) }
 
   var nameError by remember { mutableStateOf(false) }
   var uidError by remember { mutableStateOf(false) }
+  var levelError by remember { mutableStateOf(false) }
 
   AlertDialog(
     onDismissRequest = safeDismiss,
@@ -2355,7 +2292,36 @@ fun EditProfileDialog(
             .testTag("edit_profile_uid_input")
         )
 
-        // 3. In place of Region and Bio: Display Registered Account Mobile & Email used while creating account
+        // 3. Player Game Level (Editable)
+        OutlinedTextField(
+          value = level,
+          onValueChange = {
+            level = it
+            levelError = it.isBlank()
+          },
+          label = { Text("Player Level") },
+          placeholder = { Text("e.g. 50, 75, Level 60") },
+          leadingIcon = {
+            Icon(
+              imageVector = Icons.Default.MilitaryTech,
+              contentDescription = null,
+              tint = TrophyGold
+            )
+          },
+          isError = levelError,
+          supportingText = if (levelError) {
+            { Text("Player level cannot be empty", color = MaterialTheme.colorScheme.error) }
+          } else {
+            { Text("Your in-game player level", fontSize = 11.sp) }
+          },
+          singleLine = true,
+          shape = RoundedCornerShape(12.dp),
+          modifier = Modifier
+            .fillMaxWidth()
+            .testTag("edit_profile_level_input")
+        )
+
+        // 4. In place of Region and Bio: Display Registered Account Mobile & Email used while creating account
         if (accountPhone.isNotBlank() || accountEmail.isNotBlank()) {
           HorizontalDivider(
             color = MaterialTheme.colorScheme.outline.copy(alpha = 0.2f),
@@ -2469,10 +2435,11 @@ fun EditProfileDialog(
         onClick = {
           nameError = name.isBlank()
           uidError = uid.isBlank()
-          if (!nameError && !uidError) {
+          levelError = level.isBlank()
+          if (!nameError && !uidError && !levelError) {
             keyboardController?.hide()
             focusManager.clearFocus()
-            onSave(name, uid, currentProfile.region, currentProfile.bio, currentProfile.avatarId)
+            onSave(name, uid, level, currentProfile.region, currentProfile.bio, currentProfile.avatarId)
           }
         },
         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
@@ -3491,7 +3458,7 @@ fun RegisteredMatchDetailsDialog(
           Column(modifier = Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
               Text("Match Timing", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-              Text("${match.date} at ${match.time}", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold))
+              Text("${match.displayDate} at ${match.time}", style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.SemiBold))
             }
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
             Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
@@ -3913,15 +3880,7 @@ fun UserTransactionHistoryDialog(
   balance: Int,
   onDismiss: () -> Unit
 ) {
-  var selectedFilter by remember { mutableIntStateOf(0) } // 0 = All, 1 = Credits, 2 = Debits
-
-  val filteredList = remember(transactions, selectedFilter) {
-    when (selectedFilter) {
-      1 -> transactions.filter { it.type.equals("CREDIT", ignoreCase = true) }
-      2 -> transactions.filter { it.type.equals("DEBIT", ignoreCase = true) }
-      else -> transactions
-    }
-  }
+  val filteredList = transactions
 
   AlertDialog(
     onDismissRequest = onDismiss,
@@ -3959,37 +3918,6 @@ fun UserTransactionHistoryDialog(
           .heightIn(max = 420.dp),
         verticalArrangement = Arrangement.spacedBy(10.dp)
       ) {
-        // Filter Row
-        Row(
-          modifier = Modifier.fillMaxWidth(),
-          horizontalArrangement = Arrangement.spacedBy(6.dp)
-        ) {
-          listOf("All (${transactions.size})", "Credits (+)", "Debits (-)").forEachIndexed { index, label ->
-            val isSelected = selectedFilter == index
-            Surface(
-              shape = RoundedCornerShape(8.dp),
-              color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant,
-              modifier = Modifier
-                .weight(1f)
-                .clickable { selectedFilter = index }
-            ) {
-              Box(
-                contentAlignment = Alignment.Center,
-                modifier = Modifier.padding(vertical = 6.dp)
-              ) {
-                Text(
-                  text = label,
-                  style = MaterialTheme.typography.labelSmall.copy(
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 11.sp,
-                    color = if (isSelected) MaterialTheme.colorScheme.onPrimary else MaterialTheme.colorScheme.onSurface
-                  )
-                )
-              }
-            }
-          }
-        }
-
         if (filteredList.isEmpty()) {
           Box(
             modifier = Modifier

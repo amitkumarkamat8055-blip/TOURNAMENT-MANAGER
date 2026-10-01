@@ -312,7 +312,7 @@ class TournamentRepository(
   }
 
   val authStatus: Flow<AuthStatus> = activeSessionDao.getActiveSessionFlow().flatMapLatest { session ->
-    if (session == null || !session.isLoggedIn) {
+    if (session == null || !session.isLoggedIn || session.activeAccountId <= 0L) {
       flowOf(AuthStatus.LoggedOut)
     } else if (session.isGuest) {
       val guestAccount = UserAccount(
@@ -447,10 +447,13 @@ class TournamentRepository(
   }
 
   suspend fun syncSessionForFirebaseUser(firebaseUid: String) {
+    val session = activeSessionDao.getActiveSession()
+    if (session == null || !session.isLoggedIn) {
+      return
+    }
     if (firebaseUid == com.example.ui.viewmodel.AdminConfig.NON_ADMIN_UID || com.example.ui.viewmodel.AdminConfig.NON_ADMIN_UIDS.contains(firebaseUid)) {
       // Force separation from admin account for non-admin user
-      val session = activeSessionDao.getActiveSession()
-      val curAcc = session?.let { userAccountDao.findById(it.activeAccountId) }
+      val curAcc = userAccountDao.findById(session.activeAccountId)
       if (curAcc == null || curAcc.id == 2L || curAcc.phone.contains("6205964987") || curAcc.username.contains("admin", ignoreCase = true)) {
         val playerAccount = ensurePlayerAccountForUser(firebaseUid)
         activeSessionDao.setActiveSession(
@@ -465,17 +468,11 @@ class TournamentRepository(
         syncProfileWithAccount(playerAccount)
       }
     } else if (firebaseUid == com.example.ui.viewmodel.AdminConfig.ADMIN_UID || com.example.ui.viewmodel.AdminConfig.ADMIN_UIDS.contains(firebaseUid)) {
-      val adminAccount = ensureAdminAccount()
-      activeSessionDao.setActiveSession(
-        com.example.data.local.entity.ActiveSessionEntity(
-          id = 1,
-          activeAccountId = adminAccount.id,
-          isLoggedIn = true,
-          isGuest = false,
-          lastLoginTime = System.currentTimeMillis()
-        )
-      )
-      syncProfileWithAccount(adminAccount)
+      val curAcc = userAccountDao.findById(session.activeAccountId)
+      if (curAcc != null && (curAcc.id == 2L || curAcc.phone == com.example.ui.viewmodel.AdminConfig.ADMIN_PHONE)) {
+        val adminAccount = ensureAdminAccount()
+        syncProfileWithAccount(adminAccount)
+      }
     }
   }
 
@@ -558,11 +555,6 @@ class TournamentRepository(
       }
     } catch (_: Exception) {}
 
-    try {
-      val res = auth.signInAnonymously().await()
-      if (res.user != null) return res.user!!.uid
-    } catch (_: Exception) {}
-
     return auth.currentUser?.uid ?: ""
   }
 
@@ -612,9 +604,6 @@ class TournamentRepository(
       )
       syncProfileWithAccount(adminAccount)
       syncMatchJoinedForAccount(adminAccount)
-      if (auth.currentUser == null) {
-        try { auth.signInAnonymously().await() } catch (_: Exception) {}
-      }
       return Result.success(adminAccount.toDomain())
     }
 
@@ -639,9 +628,7 @@ class TournamentRepository(
           try {
             val authRes = auth.createUserWithEmailAndPassword(authEmail, trimmedPass).await()
             if (authRes.user != null) syncSessionForFirebaseUser(authRes.user!!.uid)
-          } catch (_: Exception) {
-            try { auth.signInAnonymously().await() } catch (_: Exception) {}
-          }
+          } catch (_: Exception) {}
         }
       }
       return Result.success(localAccount.toDomain())
@@ -979,15 +966,6 @@ class TournamentRepository(
     )
     syncProfileWithAccount(account)
     syncMatchJoinedForAccount(account)
-
-    // Ensure Firebase session remains active for Firestore operations
-    try {
-      if (auth.currentUser == null) {
-        auth.signInAnonymously().await()
-      }
-    } catch (e: Exception) {
-      Log.w("TournamentRepo", "Firebase auth on switchAccount: ${e.message}")
-    }
   }
 
   private suspend fun syncProfileWithAccount(account: UserAccountEntity) {
@@ -1454,12 +1432,6 @@ class TournamentRepository(
         "imageUrl" to imageUrl
     )
     
-    if (FirebaseAuth.getInstance().currentUser == null) {
-        try {
-            FirebaseAuth.getInstance().signInAnonymously().await()
-        } catch (_: Exception) {}
-    }
-    
     val targetCollection = if (category.equals("BR", ignoreCase = true)) "br_room_profiles" else "custom_profiles"
     val altCollection = if (category.equals("BR", ignoreCase = true)) "custom_profiles" else "br_room_profiles"
     try {
@@ -1559,6 +1531,7 @@ class TournamentRepository(
             gameUid = profile.uid,
             region = profile.region,
             avatarId = profile.avatarId,
+            rank = profile.rank,
             bio = profile.bio,
             walletBalance = profile.walletBalance
           )
